@@ -1,0 +1,37 @@
+# === GPT & Prompt Management ===
+openai==1.23.2
+tiktoken==0.6.0
+langchain==0.1.15  # optional, advanced prompt management
+
+# === PDF Reading, Writing, Redaction ===
+PyMuPDF==1.23.7
+pdfplumber==0.10.3
+PyPDF2==3.0.1
+pdf-redactor==0.1.6  # optional, alternative to PyPDF2 for redaction
+reportlab==4.0.9  # for creating new PDFs
+WeasyPrint==60.1  # optional, for rich document layout (requires system deps)
+
+# === OCR and Image Support ===
+pdf2image==1.17.0
+pytesseract==0.3.10
+Pillow==10.3.0
+tabula-py==2.9.0  # for table extraction (requires Java installed)
+
+# === Data Handling ===
+pandas==2.2.2
+dateparser==1.2.0
+tinydb==4.8.0  # or use built-in sqlite3
+
+# === Web Framework and Deployment (API mode) ===
+fastapi==0.111.0
+uvicorn==0.29.0
+gunicorn==21.2.0  # for production deployment
+
+# === PDF Automation, Templates, and UI ===
+Jinja2==3.1.3  # template engine for cover letters, summaries
+python-docx==1.1.0  # for Word doc generation (optional)
+PySimpleGUI==5.0.5  # alternative to tkinter for GUI
+
+# === Dev & Runtime Utilities ===
+python-dotenv==1.0.1
+pyinstaller==6.5.0  # for .exe packaging
