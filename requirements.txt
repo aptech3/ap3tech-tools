@@ -35,3 +35,12 @@ PySimpleGUI==5.0.5  # alternative to tkinter for GUI
 # === Dev & Runtime Utilities ===
 python-dotenv==1.0.1
 pyinstaller==6.5.0  # for .exe packaging
+
+# === Tkinter styling ===
+customtkinter==5.2.1
+
+# === Drag and drop functionality for files ===
+tkinterdnd2
+
+# === Fuzzy logic matching for identifying merchant processors ===
+thefuzz

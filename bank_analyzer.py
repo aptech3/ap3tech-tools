@@ -1,85 +1,79 @@
-import PyPDF2
-import pdfplumber
-import openai
+import os
 import re
-import config
-from fpdf import FPDF
-from docx import Document
+import PyPDF2
+import customtkinter as ctk
+import bsa_settings  # <-- This imports your DB logic!
+from thefuzz import fuzz
+
+def process_bank_statements(filepaths, content_frame):
+    results = []
+    merchant_keywords = bsa_settings.get_all_merchants()
+    found_new_suggestions = set()  # To avoid duplicates per batch
+
+    for pdf_path in filepaths:
+        findings, suggestions = analyze_pdf(pdf_path, merchant_keywords)
+        results.append((pdf_path, findings))
+        found_new_suggestions.update(suggestions)
+
+    # Log any new suggestions found (so you can review in BSA Settings UI)
+    for suggestion, found_in_file in found_new_suggestions:
+        bsa_settings.add_suggestion(suggestion, found_in_file)
+
+    # Show results in the content area
+    for widget in content_frame.winfo_children():
+        widget.destroy()
+    label = ctk.CTkLabel(content_frame, text="Bank Statement Analysis Results", font=("Arial", 22, "bold"), text_color="#0075c6")
+    label.pack(pady=(25, 10))
+
+    for pdf_path, findings in results:
+        ctk.CTkLabel(content_frame, text=os.path.basename(pdf_path), font=("Arial", 14, "bold"), text_color="#222").pack(pady=(10,2))
+        if findings:
+            for f in findings:
+                ctk.CTkLabel(content_frame, text=" - " + f, font=("Arial", 12), text_color="#444").pack(anchor="w", padx=30)
+        else:
+            ctk.CTkLabel(content_frame, text="No merchant processor deposits found.", font=("Arial", 12, "italic"), text_color="#a00").pack(anchor="w", padx=30)
 
 
-openai.api_key = config.openai_api_key
+# Uses fuzzy logic to identify merchant processors and collect suggestions for new ones
+def analyze_pdf(pdf_path, merchant_keywords, fuzzy_threshold=80):
+    findings = []
+    suggestions = set()
+    try:
+        with open(pdf_path, "rb") as file:
+            reader = PyPDF2.PdfReader(file)
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if not text:
+                    continue
+                page_lines = text.splitlines()
+                for line in page_lines:
+                    line_found = False
+                    line_lower = line.lower()
+                    for keyword in merchant_keywords:
+                        keyword_lower = keyword.lower()
+                        # Substring or Fuzzy match
+                        if (
+                            keyword_lower in line_lower
+                            or fuzz.partial_ratio(keyword_lower, line_lower) >= fuzzy_threshold
+                            or fuzz.ratio(keyword_lower, line_lower) >= fuzzy_threshold
+                        ):
+                            findings.append(f"Page {i+1}: {line.strip()}")
+                            line_found = True
+                            break
+                    # If not found, but looks like a merchant deposit, suggest for review!
+                    # Here we flag possible merchants if deposit/credit present and contains a capitalized word
+                    if (not line_found) and ("deposit" in line_lower or "credit" in line_lower):
+                        # Heuristic: Find "Deposit from X" or similar
+                        match = re.search(r"deposit (from|by|via)?\s*([\w\s\-\.\*&]+)", line, re.IGNORECASE)
+                        if match:
+                            possible_merchant = match.group(2).strip()
+                            if possible_merchant and len(possible_merchant) > 2:
+                                suggestions.add((possible_merchant, os.path.basename(pdf_path)))
+    except Exception as e:
+        findings.append(f"Error reading PDF: {e}")
+    return findings, suggestions
 
-#loads the PDF and extracts key text data — specifically focusing on finding merchant processor deposits.
-def extract_deposits_from_pdf(pdf_path):
-    with pdfplumber.open(pdf_path) as pdf:
-        deposits = []
-        for page in pdf.pages:
-            text = page.extract_text()
-            # Example: Regular expression to capture common merchant processor names like Square, Stripe, etc.
-            deposits.extend(re.findall(r'(Square|Stripe|Beauflor USA|PayPal|Venmo)', text))
-        return deposits
-
-
-#redacts sensitive information like account numbers or routing numbers
-def redact_sensitive_info(pdf_path):
-    with pdfplumber.open(pdf_path) as pdf:
-        redacted_pdf = PyPDF2.PdfWriter()
-        
-        for page in pdf.pages:
-            text = page.extract_text()
-            # Redacting account and routing numbers (very basic example)
-            text = re.sub(r'\d{9}', 'REDACTED', text)  # Match routing numbers
-            text = re.sub(r'\d{4} \d{4} \d{4} \d{4}', 'REDACTED', text)  # Match credit card numbers
-            
-            # Convert text back to page (not as simple as this, just an idea for later)
-            # You’d need to actually edit the PDF to visually redact the info. This part is complex.
-        
-        return redacted_pdf
-
-
-#create a PDF that will contain the merchant processor deposits highlighted
-def create_merchant_deposit_pdf(deposits, output_filename):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    
-    pdf.cell(200, 10, txt="Merchant Processor Deposits", ln=True, align="C")
-    
-    for deposit in deposits:
-        pdf.cell(200, 10, txt=f"Deposit from: {deposit}", ln=True)
-    
-    pdf.output(output_filename)
-
-
-#takes the extracted bank statement data and sends it to GPT for a summary
-def generate_summary(deposits):
-    # Craft your GPT prompt based on the extracted deposits
-    prompt = f"Analyze the following deposits: {', '.join(deposits)}. Provide a summary of the debtor's financial habits."
-    
-    response = openai.Completion.create(
-        engine="gpt-4",
-        prompt=prompt,
-        max_tokens=150,
-        temperature=0.7
-    )
-    
-    summary = response.choices[0].text.strip()
-    return summary
-
-
-#main function to run the script
-def main(pdf_path, output_pdf, summary_filename):
-    # Step 1: Extract deposits
-    deposits = extract_deposits_from_pdf(pdf_path)
-    
-    # Step 2: Generate PDF with deposits highlighted
-    create_merchant_deposit_pdf(deposits, output_pdf)
-    
-    # Step 3: Generate a summary using GPT-4
-    summary = generate_summary(deposits)
-    
-    # Step 4: Save the summary to a file
-    with open(summary_filename, "w") as f:
-        f.write(summary)
-    
-    print(f"Analysis complete. Summary saved to {summary_filename} and deposits in {output_pdf}.")
+# If you want, you can add:
+# - GPT summary integration
+# - Redaction logic
+# - Highlighting/output PDF generation, etc.
