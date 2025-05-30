@@ -1,12 +1,13 @@
 import customtkinter as ctk
-from PIL import Image
-from customtkinter import CTkImage
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox 
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import bank_analyzer
 import bsa_settings
 import threading
 import time
+import os
+from PIL import Image
+from customtkinter import CTkImage
 
 APP_NAME = "RSG Recovery Tools"
 
@@ -61,7 +62,9 @@ def set_sidebar(mode):
 
     if mode == "admin":
         for text, cmd in [
+            ("EVG Recovery File Splitter", show_evg_splitter),
             ("Bank Statement Analyzer", show_bank_analyzer),
+            ("AI Statement Analysis", show_ai_analyzer),
             ("BSA Settings", show_bsa_settings)
         ]:
             ctk.CTkButton(
@@ -74,6 +77,11 @@ def set_sidebar(mode):
 def set_content(mode):
     for widget in content.winfo_children():
         widget.destroy()
+
+    # Track which BSA Settings tab is selected ("mp" or "excl")
+    if not hasattr(set_content, "bsa_settings_list_mode"):
+        set_content.bsa_settings_list_mode = "mp"
+    list_mode = set_content.bsa_settings_list_mode
 
     if mode == "main_menu":
         try:
@@ -114,49 +122,70 @@ def set_content(mode):
         ctk.CTkLabel(drop_frame, text="Drop files here", font=("Arial", 14, "italic"), text_color="#0075c6")\
             .place(relx=0.5, rely=0.5, anchor="center")
 
-        # --- Browse Button ---
-        ctk.CTkButton(content, text="Browse Files", command=lambda: browse_files(),
-                    fg_color="#0075c6", hover_color="#005a98",
-                    text_color="white", font=("Arial", 14, "bold"),
-                    corner_radius=22, width=180).pack(pady=18)
+        # --- JUMPING LETTERS ANIMATION ---
+        canvas_height = 42
+        canvas_width = 250
+        jumping_canvas = ctk.CTkCanvas(content, width=canvas_width, height=canvas_height, bg="white", highlightthickness=0)
+        jumping_text = "Thinking"
+        jumping_canvas.pack_forget()
 
-        # --- Animated Thinking Label (NOW just below Browse Button!) ---
-        thinking_label = ctk.CTkLabel(content, text="", font=("Arial", 15, "italic"), text_color="#0075c6")
-        thinking_label.pack(pady=(0, 8))
+        selected_label = ctk.CTkLabel(content, text="", font=("Arial", 12),
+                                    text_color="#444", fg_color="white")
+        selected_label.pack(pady=5)
 
         thinking_event = threading.Event()
 
-        def animate_thinking():
-            text = "Thinking"
-            i = 0
-            while not thinking_event.is_set():
-                # Loop a space through the word for animation
-                display = text[:i+1] + " " + text[i+1:] if i < len(text) else text
-                def update_label(t=display):
-                    if thinking_label.winfo_exists():
-                        thinking_label.configure(text=t)
-                thinking_label.after(0, update_label)
-                time.sleep(0.15)
-                i = (i + 1) % len(text)
-            # Clear label at end
-            def clear_label():
-                if thinking_label.winfo_exists():
-                    thinking_label.configure(text="")
-            thinking_label.after(0, clear_label)
+        def draw_jumping_letters(idx=0):
+            if not jumping_canvas.winfo_exists():
+                return
+            jumping_canvas.delete("all")
+            base_y = 25
+            jump_height = 12
+            font_size = 26
+            font = ("Arial", font_size, "bold")
+            spacing = 0
+            char_widths = []
+            for char in jumping_text:
+                char_widths.append(15 if char != " " else 12)
+            total_width = sum(char_widths) + spacing * (len(jumping_text) - 1)
+            start_x = (canvas_width - total_width) // 2 + 5
+            x = start_x
+            for i, char in enumerate(jumping_text):
+                y = base_y - jump_height if i == idx else base_y
+                jumping_canvas.create_text(x, y, text=char, fill="#0075c6", font=font)
+                x += char_widths[i] + spacing
+
+        def animate_jumping_letters():
+            idx = 0
+            if not jumping_canvas.winfo_exists():
+                return
+            jumping_canvas.pack(pady=(8, 12))
+            try:
+                while not thinking_event.is_set():
+                    if not jumping_canvas.winfo_exists():
+                        return
+                    draw_jumping_letters(idx)
+                    idx = (idx + 1) % len(jumping_text)
+                    time.sleep(0.13)
+            finally:
+                if jumping_canvas.winfo_exists():
+                    jumping_canvas.delete("all")
+                    jumping_canvas.pack_forget()
+        # --- END JUMPING LETTERS ANIMATION ---
 
         def run_bank_analyzer(filepaths):
             import config
             openai_api_key = config.openai_api_key
             try:
-                bank_analyzer.process_bank_statements_full(filepaths, openai_api_key, content)
+                bank_analyzer.process_bank_statements_full(filepaths, content)
             finally:
-                thinking_event.set()  # Stop animation
+                thinking_event.set()
 
         def on_drop(event):
             filepaths = app.tk.splitlist(event.data)
-            thinking_label.configure(text="")  # clear label (in case)
+            selected_label.configure(text="")
             thinking_event.clear()
-            threading.Thread(target=animate_thinking, daemon=True).start()
+            threading.Thread(target=animate_jumping_letters, daemon=True).start()
             threading.Thread(target=run_bank_analyzer, args=(filepaths,), daemon=True).start()
 
         drop_frame.drop_target_register(DND_FILES)
@@ -167,18 +196,533 @@ def set_content(mode):
                 title="Select Bank Statement PDFs",
                 filetypes=[("PDF files", "*.pdf")])
             if filepaths:
-                thinking_label.configure(text="")  # clear label (in case)
+                selected_label.configure(text="")
                 thinking_event.clear()
-                threading.Thread(target=animate_thinking, daemon=True).start()
+                threading.Thread(target=animate_jumping_letters, daemon=True).start()
                 threading.Thread(target=run_bank_analyzer, args=(filepaths,), daemon=True).start()
+
+        ctk.CTkButton(content, text="Browse Files", command=browse_files,
+                    fg_color="#0075c6", hover_color="#005a98",
+                    text_color="white", font=("Arial", 14, "bold"),
+                    corner_radius=22, width=180).pack(pady=18)
+
+    elif mode == "ai_analyzer":
+        ctk.CTkLabel(content, text="AI Statement Analysis",
+                    font=("Arial", 24, "bold"), text_color="#ba0075").pack(pady=(35, 12))
+        ctk.CTkLabel(content, text="Analyze bank statements using AI (OpenAI charges apply).",
+                    font=("Arial", 16), text_color="#ba0075").pack(pady=(0, 25))
+
+        drop_frame = ctk.CTkFrame(content, width=400, height=120, fg_color="#ffe8fa", corner_radius=16)
+        drop_frame.pack(pady=12)
+        drop_frame.pack_propagate(False)
+        ctk.CTkLabel(drop_frame, text="Drop files here", font=("Arial", 14, "italic"), text_color="#ba0075")\
+            .place(relx=0.5, rely=0.5, anchor="center")
+
+        # --- JUMPING LETTERS ANIMATION ---
+        canvas_height = 42
+        canvas_width = 250
+        jumping_canvas = ctk.CTkCanvas(content, width=canvas_width, height=canvas_height, bg="white", highlightthickness=0)
+        jumping_text = "Analyzing"
+        jumping_canvas.pack_forget()
+
+        selected_label = ctk.CTkLabel(content, text="", font=("Arial", 12),
+                                    text_color="#444", fg_color="white")
+        selected_label.pack(pady=5)
+
+        thinking_event = threading.Event()
+
+        def draw_jumping_letters(idx=0):
+            if not jumping_canvas.winfo_exists():
+                return
+            jumping_canvas.delete("all")
+            base_y = 25
+            jump_height = 12
+            font_size = 26
+            font = ("Arial", font_size, "bold")
+            spacing = 0
+            char_widths = []
+            for char in jumping_text:
+                char_widths.append(15 if char != " " else 12)
+            total_width = sum(char_widths) + spacing * (len(jumping_text) - 1)
+            start_x = (canvas_width - total_width) // 2 + 5
+            x = start_x
+            for i, char in enumerate(jumping_text):
+                y = base_y - jump_height if i == idx else base_y
+                jumping_canvas.create_text(x, y, text=char, fill="#ba0075", font=font)
+                x += char_widths[i] + spacing
+
+        def animate_jumping_letters():
+            idx = 0
+            if not jumping_canvas.winfo_exists():
+                return
+            jumping_canvas.pack(pady=(8, 12))
+            try:
+                while not thinking_event.is_set():
+                    if not jumping_canvas.winfo_exists():
+                        return
+                    draw_jumping_letters(idx)
+                    idx = (idx + 1) % len(jumping_text)
+                    time.sleep(0.13)
+            finally:
+                if jumping_canvas.winfo_exists():
+                    jumping_canvas.delete("all")
+                    jumping_canvas.pack_forget()
+        # --- END JUMPING LETTERS ANIMATION ---
+
+        def run_ai_analyzer(filepaths):
+            import config
+            openai_api_key = config.openai_api_key
+            try:
+                import ai_analysis
+                ai_analysis.process_bank_statements_ai(filepaths, openai_api_key, content)
+            finally:
+                thinking_event.set()
+
+        def on_drop(event):
+            filepaths = app.tk.splitlist(event.data)
+            selected_label.configure(text="")
+            thinking_event.clear()
+            threading.Thread(target=animate_jumping_letters, daemon=True).start()
+            threading.Thread(target=run_ai_analyzer, args=(filepaths,), daemon=True).start()
+
+        drop_frame.drop_target_register(DND_FILES)
+        drop_frame.dnd_bind('<<Drop>>', on_drop)
+
+        def browse_files():
+            filepaths = filedialog.askopenfilenames(
+                title="Select Bank Statement PDFs",
+                filetypes=[("PDF files", "*.pdf")])
+            if filepaths:
+                selected_label.configure(text="")
+                thinking_event.clear()
+                threading.Thread(target=animate_jumping_letters, daemon=True).start()
+                threading.Thread(target=run_ai_analyzer, args=(filepaths,), daemon=True).start()
+
+        ctk.CTkButton(content, text="Browse Files", command=browse_files,
+                    fg_color="#ba0075", hover_color="#7e0059",
+                    text_color="white", font=("Arial", 14, "bold"),
+                    corner_radius=22, width=180).pack(pady=18)
 
     elif mode == "bsa_settings":
         ctk.CTkLabel(content, text="Bank Statement Analyzer Settings",
                      font=("Arial", 24, "bold"), text_color="#0075c6").pack(pady=(35, 12))
 
-        # ... [NO CHANGES MADE TO THE SETTINGS SECTION] ...
-        # Rest of your bsa_settings code goes here (unchanged)
-        # [Keep all your table, import/export, edit, and delete code here]
+        # --- Tab Buttons ---
+        tab_frame = ctk.CTkFrame(content, fg_color="white", corner_radius=0)
+        tab_frame.pack(pady=(8,2))
+        mp_btn = ctk.CTkButton(
+            tab_frame, text="Merchant Processor List",
+            command=lambda: (setattr(set_content, "bsa_settings_list_mode", "mp"), set_content("bsa_settings")),
+            fg_color="#0075c6" if list_mode=="mp" else "#eee",
+            text_color="white" if list_mode=="mp" else "#0075c6",
+            font=("Arial", 13, "bold"), corner_radius=13, width=200
+        )
+        excl_btn = ctk.CTkButton(
+            tab_frame, text="Exclusion List",
+            command=lambda: (setattr(set_content, "bsa_settings_list_mode", "excl"), set_content("bsa_settings")),
+            fg_color="#8e7cc3" if list_mode=="excl" else "#eee",
+            text_color="white" if list_mode=="excl" else "#8e7cc3",
+            font=("Arial", 13, "bold"), corner_radius=13, width=200
+        )
+        mp_btn.pack(side="left", padx=5)
+        excl_btn.pack(side="left", padx=5)
+
+        # --- Import/Export Buttons ---
+        btn_frame = ctk.CTkFrame(content, fg_color="white", corner_radius=0)
+        btn_frame.pack(pady=4)
+        if list_mode == "mp":
+            def do_export():
+                path = filedialog.asksaveasfilename(title="Export Merchant List",
+                                                    defaultextension=".txt",
+                                                    filetypes=[("Text Files", "*.txt")])
+                if path:
+                    bsa_settings.export_merchants_txt(path)
+                    messagebox.showinfo("Exported!", f"Merchant list exported to:\n{path}")
+            # --- inside set_content() where list_mode == "mp" ---
+            def do_import():
+                path = filedialog.askopenfilename(title="Import Merchant List",
+                                                filetypes=[("Text Files", "*.txt")])
+                if path:
+                    bsa_settings.import_merchants_txt(path)
+                    messagebox.showinfo("Imported!", f"Merchant list imported from:\n{path}")
+                    merchants_now = bsa_settings.get_all_merchants_with_ids()
+                    print(f"[DEBUG] After import: {len(merchants_now)} merchant(s) in DB: {merchants_now}")
+                    refresh_table()
+            ctk.CTkButton(btn_frame, text="Import", command=do_import,
+                        fg_color="#0075c6", hover_color="#005a98",
+                        text_color="white", font=("Arial", 12, "bold"),
+                        corner_radius=14, height=30, width=110).pack(side="left", padx=4)
+            ctk.CTkButton(btn_frame, text="Export", command=do_export,
+                        fg_color="#0075c6", hover_color="#005a98",
+                        text_color="white", font=("Arial", 12, "bold"),
+                        corner_radius=14, height=30, width=110).pack(side="left", padx=4)
+        else:
+            def do_export():
+                path = filedialog.asksaveasfilename(title="Export Exclusion List",
+                                                    defaultextension=".txt",
+                                                    filetypes=[("Text Files", "*.txt")])
+                if path:
+                    bsa_settings.export_exclusions_txt(path)
+                    messagebox.showinfo("Exported!", f"Exclusion list exported to:\n{path}")
+            def do_import():
+                path = filedialog.askopenfilename(title="Import Exclusion List",
+                                                filetypes=[("Text Files", "*.txt")])
+                if path:
+                    bsa_settings.import_exclusions_txt(path)
+                    messagebox.showinfo("Imported!", f"Exclusion list imported from:\n{path}")
+                    exclusions_now = bsa_settings.get_all_exclusions_with_ids()
+                    print(f"[DEBUG] After import: {len(exclusions_now)} exclusions in DB: {exclusions_now}")
+                    refresh_table()
+            ctk.CTkButton(btn_frame, text="Import", command=do_import,
+                        fg_color="#8e7cc3", hover_color="#0f6c2d",
+                        text_color="white", font=("Arial", 12, "bold"),
+                        corner_radius=14, height=30, width=110).pack(side="left", padx=4)
+            ctk.CTkButton(btn_frame, text="Export", command=do_export,
+                        fg_color="#8e7cc3", hover_color="#0f6c2d",
+                        text_color="white", font=("Arial", 12, "bold"),
+                        corner_radius=14, height=30, width=110).pack(side="left", padx=4)
+
+        # --- Scrollable Table ---
+        table_frame = ctk.CTkFrame(content, fg_color="white", corner_radius=12)
+        table_frame.pack(fill="both", expand=True, pady=(10,0), padx=16)
+        canvas = ctk.CTkCanvas(table_frame, bg="white", highlightthickness=0)
+        canvas.pack(side="left", fill="both", expand=True)
+        vsb = ctk.CTkScrollbar(table_frame, orientation="vertical", command=canvas.yview)
+        vsb.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=vsb.set)
+        table_inner = ctk.CTkFrame(canvas, fg_color="white")
+        canvas.create_window((0,0), window=table_inner, anchor="nw")
+
+        set_content.checkbox_vars = {}
+
+        def on_frame_configure(evt):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        table_inner.bind("<Configure>", on_frame_configure)
+
+        # --- Table/CRUD context setup ---
+        def refresh_table():
+            for w in table_inner.winfo_children():
+                w.destroy()
+            set_content.checkbox_vars.clear()
+            if list_mode == "mp":
+                items = bsa_settings.get_all_merchants_with_ids()
+                headers = ["", "Root", "Merchant Processor", "C/O", "Address", "City", "State", "ZIP", "Notes"]
+                widths  = [3, 80, 200, 80, 170, 90, 50, 60, 180]
+            else:
+                items = bsa_settings.get_all_exclusions_with_ids()
+                headers = ["", "Excluded Entity", "Reason", "Notes"]
+                widths  = [3, 220, 180, 210]
+
+            for col, (h, w) in enumerate(zip(headers, widths)):
+                ctk.CTkLabel(table_inner, text=h, font=("Arial", 13, "bold"),
+                             text_color="#0075c6" if list_mode=="mp" else "#8e7cc3",
+                             anchor="w", width=w).grid(row=0, column=col, sticky="w", padx=(4 if col==0 else 2,2))
+
+            for r, row in enumerate(items, start=1):
+                var = ctk.BooleanVar()
+                set_content.checkbox_vars[row[0]] = var
+                ctk.CTkCheckBox(table_inner, variable=var, text="", width=18,
+                                fg_color="#0075c6" if list_mode=="mp" else "#8e7cc3")\
+                    .grid(row=r, column=0, padx=(4,2), pady=2, sticky="w")
+                for ci, val in enumerate(row[1:], start=1):
+                    lbl = ctk.CTkLabel(table_inner, text=val or "", anchor="w",
+                                    width=widths[ci], font=("Arial", 12))
+
+                    # If this is the Merchant Name column, make it clickable and highlight on hover
+                    if list_mode == "mp" and ci == 1:  # Only for Merchant Name
+                        def make_edit_handler(row_id=row[0]):  # Need default arg to avoid late binding
+                            def handler(event=None):
+                                open_edit_popup(row_id)
+                            return handler
+                        def on_enter(e, label=lbl):
+                            label.configure(bg_color="#e5f2ff")
+                        def on_leave(e, label=lbl):
+                            label.configure(bg_color="white")
+                        lbl.bind("<Button-1>", make_edit_handler())
+                        lbl.bind("<Enter>", on_enter)
+                        lbl.bind("<Leave>", on_leave)
+                        lbl.configure(cursor="hand2")
+                    lbl.grid(row=r, column=ci, sticky="w", padx=2, pady=2)
+
+        refresh_table()
+
+        def open_edit_popup(row_id):
+            data = bsa_settings.get_merchant_by_id(row_id)
+            if not data:
+                messagebox.showerror("Error", "Merchant not found!")
+                return
+            popup = ctk.CTkToplevel(app)
+            popup.transient(app)
+            popup.grab_set()
+            popup.lift()
+            popup.focus_force()
+
+            popup_w, popup_h = 420, 545
+
+            app.update_idletasks()
+            parent_x = app.winfo_x()
+            parent_y = app.winfo_y()
+            parent_w = app.winfo_width()
+            parent_h = app.winfo_height()
+
+            center_x = parent_x + (parent_w // 2) - (popup_w // 2)
+            center_y = parent_y + (parent_h // 2) - (popup_h // 2)
+            popup.geometry(f"{popup_w}x{popup_h}+{center_x}+{center_y}")
+            popup.title(f"Edit Merchant: {data['name']}")
+            
+            fields = ["root", "name", "co", "address", "city", "state", "zip", "notes"]
+            vars = {f: ctk.StringVar(value=data.get(f, "")) for f in fields}
+            row = 0
+
+            popup.grid_columnconfigure(1, weight=1)
+
+            for f in fields[:-1]:
+                display_name = f.capitalize() if f != "co" else "C/O"
+                ctk.CTkLabel(popup, text=display_name + ":", font=("Arial",13)).grid(
+                    row=row, column=0, sticky="e", padx=14, pady=6)
+                ctk.CTkEntry(popup, textvariable=vars[f], width=280).grid(
+                    row=row, column=1, padx=8, pady=6, sticky="ew")
+                row += 1
+
+            ctk.CTkLabel(popup, text="Notes:", font=("Arial",13)).grid(
+                row=row, column=0, sticky="ne", padx=14, pady=6)
+            notes_box = ctk.CTkTextbox(popup, width=280, height=64)
+            notes_box.insert("1.0", data["notes"] or "")
+            notes_box.grid(row=row, column=1, padx=8, pady=6, sticky="nsew")
+
+            # Let notes box expand if window resizes
+            popup.grid_rowconfigure(row, weight=1)
+            row += 1
+
+            def save_changes():
+                bsa_settings.edit_merchant_by_id(row_id, data.get("root", ""), *[vars[f].get() for f in fields])
+                popup.destroy()
+                refresh_table()
+
+            btnf = ctk.CTkFrame(popup, fg_color="white", corner_radius=0)
+            btnf.grid(row=row, column=0, columnspan=2, pady=(0, 20))
+            ctk.CTkButton(btnf, text="Save", command=save_changes, fg_color="#0075c6", width=90).pack(side="left", padx=8)
+            ctk.CTkButton(btnf, text="Cancel", command=popup.destroy, fg_color="#bbb", width=90).pack(side="left", padx=8)
+
+        # --- Add/Edit Popups (unchanged, but call correct CRUD for each tab) ---
+        def add_item_popup():
+            if current_popup["window"] and current_popup["window"].winfo_exists():
+                current_popup["window"].lift(); current_popup["window"].focus_force()
+                return
+            popup = ctk.CTkToplevel(app)
+            popup.transient(app)
+            popup.grab_set()
+            popup.lift()
+            popup.focus_force()
+
+            popup_w, popup_h = 420, 545
+
+            app.update_idletasks()
+            parent_x = app.winfo_x()
+            parent_y = app.winfo_y()
+            parent_w = app.winfo_width()
+            parent_h = app.winfo_height()
+
+            center_x = parent_x + (parent_w // 2) - (popup_w // 2)
+            center_y = parent_y + (parent_h // 2) - (popup_h // 2)
+            popup.geometry(f"{popup_w}x{popup_h}+{center_x}+{center_y}")
+            current_popup["window"] = popup
+
+            popup.grid_columnconfigure(1, weight=1)
+
+            if set_content.bsa_settings_list_mode == "mp":
+                popup.title("Add Merchant Processor")
+                labels = ["Root", "MP Name", "C/O", "Address", "City", "State", "ZIP"]
+                vars = [ctk.StringVar() for _ in labels]
+
+                # --- Layout fields ---
+                for i, (lbl, var) in enumerate(zip(labels, vars)):
+                    pretty_lbl = lbl if lbl != "C/O" else "C/O"
+                    ctk.CTkLabel(popup, text=pretty_lbl + ":", font=("Arial",13)).grid(
+                        row=i, column=0, sticky="e", padx=14, pady=6)
+                    ctk.CTkEntry(popup, textvariable=var, width=280).grid(
+                        row=i, column=1, padx=8, pady=6, sticky="ew")
+
+                # Notes (multiline) field
+                notes_row = len(labels)
+                ctk.CTkLabel(popup, text="Notes:", font=("Arial",13)).grid(
+                    row=notes_row, column=0, sticky="ne", padx=14, pady=6)
+                notes_box = ctk.CTkTextbox(popup, width=280, height=64)
+                notes_box.grid(row=notes_row, column=1, padx=8, pady=6, sticky="nsew")
+
+                # Let notes box expand
+                popup.grid_rowconfigure(notes_row, weight=1)
+
+                # Save/Cancel buttons
+                btn_row = notes_row + 1
+                btnf = ctk.CTkFrame(popup, fg_color="white", corner_radius=0)
+                btnf.grid(row=btn_row, column=0, columnspan=2, pady=(0, 20))
+                ctk.CTkButton(btnf, text="Save", command=lambda: add_and_close(), fg_color="#0075c6", width=90).pack(side="left", padx=8)
+                ctk.CTkButton(btnf, text="Cancel", command=popup.destroy, fg_color="#bbb", width=90).pack(side="left", padx=8)
+
+                def add_and_close():
+                    data = [v.get().strip() for v in vars]
+                    if not data[0]:
+                        messagebox.showwarning("Missing Name","Merchant name is required."); return
+                    notes = notes_box.get("1.0","end-1c").strip()
+                    bsa_settings.add_merchant_full(*data, notes)
+                    popup.destroy(); current_popup["window"]=None
+                    refresh_table()
+
+            else:
+                # (Keep your exclusion popup code the same as before)
+                popup.title("Add Exclusion")
+                popup.geometry("400x310")
+                entity_var = ctk.StringVar()
+                reason_var = ctk.StringVar()
+                ctk.CTkLabel(popup, text="Excluded Entity:", font=("Arial",13)).pack(pady=(10,2), anchor="w", padx=18)
+                ctk.CTkEntry(popup, textvariable=entity_var, width=320).pack(pady=2, padx=18)
+                ctk.CTkLabel(popup, text="Reason:", font=("Arial",13)).pack(pady=(6,2), anchor="w", padx=18)
+                ctk.CTkEntry(popup, textvariable=reason_var, width=320).pack(pady=2, padx=18)
+                ctk.CTkLabel(popup, text="Notes:", font=("Arial",13)).pack(pady=2, anchor="w", padx=18)
+                notes_box = ctk.CTkTextbox(popup, width=320, height=48)
+                notes_box.pack(pady=2, padx=18)
+                def add_and_close():
+                    entity = entity_var.get().strip()
+                    reason = reason_var.get().strip()
+                    notes = notes_box.get("1.0","end-1c").strip()
+                    if not entity:
+                        messagebox.showwarning("Missing Entity","Excluded entity is required."); return
+                    bsa_settings.add_exclusion(entity, reason, notes)
+                    popup.destroy(); current_popup["window"]=None
+                    refresh_table()
+
+                btnf = ctk.CTkFrame(popup, fg_color="white", corner_radius=0)
+                btnf.pack(pady=14)
+                ctk.CTkButton(btnf, text="Save", command=add_and_close,
+                            fg_color="#8e7cc3",
+                            hover_color="#0f6c2d", width=80).pack(side="left", padx=8)
+                ctk.CTkButton(btnf, text="Cancel", command=popup.destroy,
+                            fg_color="#bbb", width=80).pack(side="left", padx=8)
+
+            popup.protocol("WM_DELETE_WINDOW", lambda: (popup.grab_release(), current_popup.__setitem__("window",None), popup.destroy()))
+
+        def delete_items_selected():
+            to_delete = [mid for mid,var in set_content.checkbox_vars.items() if var.get()]
+            if not to_delete:
+                messagebox.showwarning("Delete","No items selected."); return
+            msg = f"Delete {len(to_delete)} selected?"
+            if messagebox.askyesno("Confirm Delete", msg):
+                if list_mode == "mp":
+                    bsa_settings.delete_merchants_by_ids(to_delete)
+                else:
+                    bsa_settings.delete_exclusions_by_ids(to_delete)
+                refresh_table()
+
+        # --- Add/Delete buttons ---
+        ctrl = ctk.CTkFrame(content, fg_color="white", corner_radius=0)
+        ctrl.pack(fill="x", pady=(8,16))
+        ctk.CTkButton(ctrl, text="Add", command=add_item_popup,
+                      fg_color="#0075c6" if list_mode=="mp" else "#8e7cc3",
+                      hover_color="#005a98" if list_mode=="mp" else "#0f6c2d", width=90).pack(side="left", padx=6)
+        ctk.CTkButton(ctrl, text="Delete", command=delete_items_selected,
+                      fg_color="#e74c3c", hover_color="#c0392b", width=90).pack(side="right", padx=6)
+
+        ctk.CTkLabel(content, text="• Click a merchant name to edit all fields. Use checkboxes and Delete to remove. Add to create new.",
+                     font=("Arial",12), text_color="#666").pack(pady=(8,10))
+
+    elif mode == "evg_splitter":
+        ctk.CTkLabel(content, text="EVG Recovery File Splitter",
+                    font=("Arial", 24, "bold"), text_color="#1e9148").pack(pady=(35, 12))
+        ctk.CTkLabel(content, text="Drag and drop the EVG Recovery PDF here, or click to browse.",
+                    font=("Arial", 16), text_color="#255532").pack(pady=(0, 25))
+
+        drop_frame = ctk.CTkFrame(content, width=400, height=120, fg_color="#e8faec", corner_radius=16)
+        drop_frame.pack(pady=12)
+        drop_frame.pack_propagate(False)
+        ctk.CTkLabel(drop_frame, text="Drop files here", font=("Arial", 14, "italic"), text_color="#1e9148")\
+            .place(relx=0.5, rely=0.5, anchor="center")
+
+        # --- JUMPING LETTERS ANIMATION (green) ---
+        canvas_height = 42
+        canvas_width = 250
+        jumping_canvas = ctk.CTkCanvas(content, width=canvas_width, height=canvas_height, bg="white", highlightthickness=0)
+        jumping_text = "Splitting"
+        jumping_canvas.pack_forget()
+
+        selected_label = ctk.CTkLabel(content, text="", font=("Arial", 12),
+                                    text_color="#444", fg_color="white")
+        selected_label.pack(pady=5)
+
+        thinking_event = threading.Event()
+
+        def draw_jumping_letters(idx=0):
+            if not jumping_canvas.winfo_exists():
+                return
+            jumping_canvas.delete("all")
+            base_y = 25
+            jump_height = 12
+            font_size = 26
+            font = ("Arial", font_size, "bold")
+            spacing = 0
+            char_widths = []
+            for char in jumping_text:
+                char_widths.append(15 if char != " " else 12)
+            total_width = sum(char_widths) + spacing * (len(jumping_text) - 1)
+            start_x = (canvas_width - total_width) // 2 + 5
+            x = start_x
+            for i, char in enumerate(jumping_text):
+                y = base_y - jump_height if i == idx else base_y
+                jumping_canvas.create_text(x, y, text=char, fill="#1e9148", font=font)
+                x += char_widths[i] + spacing
+
+        def animate_jumping_letters():
+            idx = 0
+            if not jumping_canvas.winfo_exists():
+                return
+            jumping_canvas.pack(pady=(8, 12))
+            try:
+                while not thinking_event.is_set():
+                    if not jumping_canvas.winfo_exists():
+                        return
+                    draw_jumping_letters(idx)
+                    idx = (idx + 1) % len(jumping_text)
+                    time.sleep(0.13)
+            finally:
+                if jumping_canvas.winfo_exists():
+                    jumping_canvas.delete("all")
+                    jumping_canvas.pack_forget()
+        # --- END JUMPING LETTERS ANIMATION ---
+
+        def run_evg_splitter(filepaths):
+            try:
+                import evg_splitter
+                output_root = os.path.join(os.path.expanduser("~"), "Desktop", "RSG Recovery Tools data output")
+                os.makedirs(output_root, exist_ok=True)
+                for file in filepaths:
+                    evg_splitter.split_recovery_pdf(file, output_dir=output_root)
+            finally:
+                thinking_event.set()
+
+        def on_drop(event):
+            filepaths = app.tk.splitlist(event.data)
+            selected_label.configure(text="")
+            thinking_event.clear()
+            threading.Thread(target=animate_jumping_letters, daemon=True).start()
+            threading.Thread(target=run_evg_splitter, args=(filepaths,), daemon=True).start()
+
+        drop_frame.drop_target_register(DND_FILES)
+        drop_frame.dnd_bind('<<Drop>>', on_drop)
+
+        def browse_files():
+            filepaths = filedialog.askopenfilenames(
+                title="Select EVG Recovery PDF(s)",
+                filetypes=[("PDF files", "*.pdf")])
+            if filepaths:
+                selected_label.configure(text="")
+                thinking_event.clear()
+                threading.Thread(target=animate_jumping_letters, daemon=True).start()
+                threading.Thread(target=run_evg_splitter, args=(filepaths,), daemon=True).start()
+
+        ctk.CTkButton(content, text="Browse Files", command=browse_files,
+                    fg_color="#1e9148", hover_color="#18843d",
+                    text_color="white", font=("Arial", 14, "bold"),
+                    corner_radius=22, width=180).pack(pady=18)
 
 # --- Navigation helper functions ---
 def show_main_menu():    set_sidebar("main_menu");    set_content("main_menu")
@@ -186,7 +730,11 @@ def show_admin():        set_sidebar("admin");        set_content("admin")
 def show_collections():  set_sidebar("collections");  set_content("collections")
 def show_sales():        set_sidebar("sales");        set_content("sales")
 def show_bank_analyzer():set_sidebar("admin");        set_content("bank_analyzer")
-def show_bsa_settings(): set_sidebar("admin");        set_content("bsa_settings")
+def show_ai_analyzer():  set_sidebar("admin");        set_content("ai_analyzer")
+def show_bsa_settings(): 
+    set_sidebar("admin")
+    set_content("bsa_settings")
+def show_evg_splitter(): set_sidebar("admin");        set_content("evg_splitter")
 
 show_main_menu()
 
