@@ -44,3 +44,5 @@ tkinterdnd2
 
 # === Fuzzy logic matching for identifying merchant processors ===
 thefuzz
+# === Trying PyQt5 for better GUI styling ===
+pyQt5==5.15.11
