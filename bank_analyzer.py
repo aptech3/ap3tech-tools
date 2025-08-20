@@ -1,16 +1,19 @@
-import sys
 import os
 import re
-from pathlib import Path
-import PyPDF2
-import fitz  # PyMuPDF for robust PDF reading & redaction
-from thefuzz import fuzz
-import bsa_settings  # Your DB logic!
-from pdf2image import convert_from_path
-import pytesseract
 import shutil
+import sys
+from pathlib import Path
+
+import fitz  # PyMuPDF for robust PDF reading & redaction
+import PyPDF2
+import pytesseract
+from pdf2image import convert_from_path
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from thefuzz import fuzz
+
+import bsa_settings  # Your DB logic!
+
 
 def get_tesseract_cmd():
     base = getattr(sys, "_MEIPASS", os.path.abspath(os.path.dirname(__file__)))
@@ -22,9 +25,13 @@ def get_tesseract_cmd():
         return dev_path
     if shutil.which("tesseract"):
         return "tesseract"
-    raise FileNotFoundError("Tesseract executable not found. Please install it or add it to your PATH.")
+    raise FileNotFoundError(
+        "Tesseract executable not found. Please install it or add it to your PATH."
+    )
+
 
 pytesseract.pytesseract.tesseract_cmd = get_tesseract_cmd()
+
 
 def get_poppler_path():
     base = getattr(sys, "_MEIPASS", os.path.abspath(os.path.dirname(__file__)))
@@ -38,11 +45,13 @@ def get_poppler_path():
             return p
     raise FileNotFoundError(f"No Poppler bin folder found in {poppler_root}")
 
+
 def get_desktop_output_folder():
     desktop = Path.home() / "Desktop"
     output = desktop / "RSG Recovery Tools data output"
     output.mkdir(parents=True, exist_ok=True)
     return output
+
 
 def get_statement_subfolder(pdf_path):
     company_name = extract_company_name(pdf_path)
@@ -51,13 +60,15 @@ def get_statement_subfolder(pdf_path):
     subfolder.mkdir(parents=True, exist_ok=True)
     return subfolder
 
+
 def extract_company_name(pdf_path):
     base = os.path.basename(pdf_path)
     name = os.path.splitext(base)[0]
     for suffix in [" Bank Statements", " bank statements", " statement", " Statement"]:
         if name.endswith(suffix):
-            name = name[:-len(suffix)]
+            name = name[: -len(suffix)]
     return name.strip()
+
 
 def is_excluded(processor, exclusion_keywords, threshold=85):
     processor = processor.lower().strip()
@@ -65,6 +76,7 @@ def is_excluded(processor, exclusion_keywords, threshold=85):
         if fuzz.ratio(processor, exclusion.lower().strip()) >= threshold:
             return True
     return False
+
 
 def redact_pdf_page(input_pdf_path, page_num, output_pdf_path, keyword=None):
     doc = fitz.open(input_pdf_path)
@@ -86,7 +98,7 @@ def redact_pdf_page(input_pdf_path, page_num, output_pdf_path, keyword=None):
             for rect in rects:
                 page.add_highlight_annot(rect)
     text = page.get_text()
-    for match in re.finditer(r'(?<!\d)(\d{9,12})(?!\d)', text):
+    for match in re.finditer(r"(?<!\d)(\d{9,12})(?!\d)", text):
         redaction_rects = page.search_for(match.group())
         for rect in redaction_rects:
             page.add_redact_annot(rect, fill=(1, 1, 1))
@@ -97,18 +109,24 @@ def redact_pdf_page(input_pdf_path, page_num, output_pdf_path, keyword=None):
     single_page_doc.close()
     doc.close()
 
+
 def extract_possible_processor_name(line):
     # Remove date, transaction descriptors, extra junk
     line = re.sub(r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}", "", line).strip()
-    line = re.sub(r"(POS|PURCHASE|NON\-PIN|ACH|TRANSFER|PMT|DEPOSIT|WITHDRAWAL|ATM|DIRECT DEP|INTEREST|CHECK|BALANCE|PAYROLL|PRIDE BASICS|SBFS|LIMIT|INTERNAL|VENDOR|MOBILE|FEE)", "", line, flags=re.IGNORECASE)
+    line = re.sub(
+        r"(POS|PURCHASE|NON\-PIN|ACH|TRANSFER|PMT|DEPOSIT|WITHDRAWAL|ATM|DIRECT DEP|INTEREST|CHECK|BALANCE|PAYROLL|PRIDE BASICS|SBFS|LIMIT|INTERNAL|VENDOR|MOBILE|FEE)",
+        "",
+        line,
+        flags=re.IGNORECASE,
+    )
     # Try to match company name, strip after first location/city/state
     company_match = re.search(r"([A-Z][A-Z\s&\-\*]{2,})(?:[\s,]+[A-Z]{2,}|$)", line)
     if company_match:
         # Uber Eats, SPECTRUM, WALMART etc.
         name = company_match.group(1).strip()
         # Remove city, state, numbers, trailing junk
-        name = re.sub(r"\s+[A-Z]{2,}.*$", "", name) # Cut after city/state code
-        name = re.sub(r"\d+", "", name) # Remove numbers
+        name = re.sub(r"\s+[A-Z]{2,}.*$", "", name)  # Cut after city/state code
+        name = re.sub(r"\d+", "", name)  # Remove numbers
         return name.strip()
     # Fallback: up to 2 capitalized words in a row
     capwords = re.findall(r"\b([A-Z][a-zA-Z]+)\b", line)
@@ -116,22 +134,35 @@ def extract_possible_processor_name(line):
         return " ".join(capwords[:2])
     return " ".join(line.split()[:2]).strip()
 
+
 def find_processor_pages(pdf_path, merchant_keywords, debtor_name):
     processor_pages = {}
     seen_normalized = set()
     SKIP_WORDS = [
-        "payroll", "ytd", "overdraft", "interest", "tax", "wire", "atm", "available", "accrued", "ads", "transfer"
+        "payroll",
+        "ytd",
+        "overdraft",
+        "interest",
+        "tax",
+        "wire",
+        "atm",
+        "available",
+        "accrued",
+        "ads",
+        "transfer",
     ]
     try:
         reader = PyPDF2.PdfReader(pdf_path)
         for i, page in enumerate(reader.pages):
-            text = page.extract_text() or ''
+            text = page.extract_text() or ""
             for line in text.splitlines():
                 line_lower = line.lower()
 
                 # Only look at deposit/credit lines (no negatives, no "withdrawal" words)
                 amounts = re.findall(r"\$?(-?[\d,]+\.\d\d)", line)
-                is_deposit = any(not amt.replace(',', '').strip().startswith('-') for amt in amounts)
+                is_deposit = any(
+                    not amt.replace(",", "").strip().startswith("-") for amt in amounts
+                )
                 if not is_deposit:
                     continue
 
@@ -144,9 +175,8 @@ def find_processor_pages(pdf_path, merchant_keywords, debtor_name):
                         break
 
                 # POSSIBLE processor
-                if (
-                    debtor_name.lower() not in line_lower
-                    and not any(k.lower() in line_lower for k in merchant_keywords)
+                if debtor_name.lower() not in line_lower and not any(
+                    k.lower() in line_lower for k in merchant_keywords
                 ):
                     possible_name = extract_possible_processor_name(line)
                     norm = possible_name.lower().strip()
@@ -154,7 +184,7 @@ def find_processor_pages(pdf_path, merchant_keywords, debtor_name):
                         possible_name
                         and len(possible_name) > 2
                         and norm not in seen_normalized
-                        and re.search(r'[a-zA-Z]', possible_name)
+                        and re.search(r"[a-zA-Z]", possible_name)
                         and not any(skip in norm for skip in SKIP_WORDS)
                     ):
                         processor_pages[f"Possible Processor - {possible_name}"] = i
@@ -163,22 +193,37 @@ def find_processor_pages(pdf_path, merchant_keywords, debtor_name):
         print(f"Error reading {pdf_path}: {e}")
     return processor_pages
 
-def find_processor_pages_with_exclusion(pdf_path, merchant_keywords, debtor_name, exclusion_keywords):
+
+def find_processor_pages_with_exclusion(
+    pdf_path, merchant_keywords, debtor_name, exclusion_keywords
+):
     processor_pages = {}
     seen_normalized = set()
     SKIP_WORDS = [
-        "payroll", "ytd", "overdraft", "interest", "tax", "wire", "atm", "available", "accrued", "ads", "transfer"
+        "payroll",
+        "ytd",
+        "overdraft",
+        "interest",
+        "tax",
+        "wire",
+        "atm",
+        "available",
+        "accrued",
+        "ads",
+        "transfer",
     ]
     try:
         reader = PyPDF2.PdfReader(pdf_path)
         for i, page in enumerate(reader.pages):
-            text = page.extract_text() or ''
+            text = page.extract_text() or ""
             for line in text.splitlines():
                 line_lower = line.lower()
 
                 # Only look at deposit/credit lines (no negatives, no "withdrawal" words)
                 amounts = re.findall(r"\$?(-?[\d,]+\.\d\d)", line)
-                is_deposit = any(not amt.replace(',', '').strip().startswith('-') for amt in amounts)
+                is_deposit = any(
+                    not amt.replace(",", "").strip().startswith("-") for amt in amounts
+                )
                 if not is_deposit:
                     continue
 
@@ -195,9 +240,8 @@ def find_processor_pages_with_exclusion(pdf_path, merchant_keywords, debtor_name
                         break
 
                 # POSSIBLE processor
-                if (
-                    debtor_name.lower() not in line_lower
-                    and not any(k.lower() in line_lower for k in merchant_keywords)
+                if debtor_name.lower() not in line_lower and not any(
+                    k.lower() in line_lower for k in merchant_keywords
                 ):
                     possible_name = extract_possible_processor_name(line)
                     norm = possible_name.lower().strip()
@@ -205,7 +249,7 @@ def find_processor_pages_with_exclusion(pdf_path, merchant_keywords, debtor_name
                         possible_name
                         and len(possible_name) > 2
                         and norm not in seen_normalized
-                        and re.search(r'[a-zA-Z]', possible_name)
+                        and re.search(r"[a-zA-Z]", possible_name)
                         and not any(skip in norm for skip in SKIP_WORDS)
                     ):
                         if is_excluded(possible_name, exclusion_keywords):
@@ -250,7 +294,7 @@ def save_processor_pages(pdf_path, processor_matches, subfolder):
             page.add_highlight_annot(rect)
 
         # Redact account numbers (leave last 4)
-        for match in re.finditer(r'(?<!\d)(\d{9,12})(?!\d)', text):
+        for match in re.finditer(r"(?<!\d)(\d{9,12})(?!\d)", text):
             redaction_rects = page.search_for(match.group())
             for rect in redaction_rects:
                 page.add_redact_annot(rect, fill=(1, 1, 1))
@@ -264,8 +308,11 @@ def save_processor_pages(pdf_path, processor_matches, subfolder):
         single_page_doc.close()
         doc.close()
 
+
 def extract_text_from_pdf(pdf_path):
-    import pdfplumber, pytesseract
+    import pdfplumber
+    import pytesseract
+
     with pdfplumber.open(pdf_path) as pdf:
         text = "\n".join(page.extract_text() or "" for page in pdf.pages)
     if text.strip():
@@ -277,9 +324,17 @@ def extract_text_from_pdf(pdf_path):
         ocr_text += pytesseract.image_to_string(img) + "\n"
     return ocr_text
 
+
 def process_bank_statements_full(filepaths, content_frame=None):
     # Get merchant processors (known) and exclusions
-    merchant_keywords = bsa_settings.get_all_merchants() + ["Square", "Stripe", "Intuit", "Coinbase", "Etsy", "PayPal"]
+    merchant_keywords = bsa_settings.get_all_merchants() + [
+        "Square",
+        "Stripe",
+        "Intuit",
+        "Coinbase",
+        "Etsy",
+        "PayPal",
+    ]
     exclusion_keywords = [e[1] for e in bsa_settings.get_all_exclusions_with_ids()]
 
     def is_excluded(processor):
@@ -298,7 +353,9 @@ def process_bank_statements_full(filepaths, content_frame=None):
         processor_matches = {}
 
         # Updated processor page finding logic (incorporating exclusion filtering)
-        all_matches = find_processor_pages_with_exclusion(pdf_path, merchant_keywords, debtor_name, exclusion_keywords)
+        all_matches = find_processor_pages_with_exclusion(
+            pdf_path, merchant_keywords, debtor_name, exclusion_keywords
+        )
 
         # Save only non-excluded pages
         for processor, page_num in all_matches.items():
@@ -328,18 +385,30 @@ def process_bank_statements_full(filepaths, content_frame=None):
             debtor_name, summary_pdf, processor_totals, total_income, linked_accounts, possible_mcas
         )
 
+
 def summarize_linked_accounts(text):
     # Look for lines indicating transfers (ACH, XFER, etc.) and extract last 4s
-    transfer_keywords = ['transfer', 'xfer', 'ach', 'external account', 'to acct', 'from acct', 'withdrawal', 'deposit']
+    transfer_keywords = [
+        "transfer",
+        "xfer",
+        "ach",
+        "external account",
+        "to acct",
+        "from acct",
+        "withdrawal",
+        "deposit",
+    ]
     lines = text.splitlines()
     accounts = set()
     for line in lines:
-        l = line.lower()
-        if any(k in l for k in transfer_keywords):
+        line_lower = line.lower()
+        if any(k in line_lower for k in transfer_keywords):
             # Look for last 4 digit account patterns
-            for m in re.findall(r'\b(\d{4})\b', line):
+            # Look for last 4 digit account patterns
+            for m in re.findall(r"\b(\d{4})\b", line):
                 accounts.add(m)
     return sorted(accounts)
+
 
 def summarize_processors(text, known_processors):
     processor_totals = {}
@@ -363,6 +432,7 @@ def summarize_processors(text, known_processors):
             total_income += proc_total
     return processor_totals, total_income
 
+
 def find_possible_mcas(text):
     # Keywords you want to flag
     mca_keywords = ["fund", "funder", "funding", "capital", "advance"]
@@ -374,6 +444,7 @@ def find_possible_mcas(text):
             results.append(line.strip())
     return results
 
+
 def write_linked_accounts_summary(c, margin, y, linked_accounts):
     if not linked_accounts:
         c.drawString(margin, y, "None found.")
@@ -383,6 +454,7 @@ def write_linked_accounts_summary(c, margin, y, linked_accounts):
             c.drawString(margin, y, f"Account: {acct}")
             y -= 16
     return y
+
 
 def write_processor_summary(c, margin, y, processor_totals, total_income):
     if not processor_totals:
@@ -395,7 +467,10 @@ def write_processor_summary(c, margin, y, processor_totals, total_income):
             y -= 16
     return y
 
-def write_basic_summary_pdf(debtor_name, summary_path, processor_totals, total_income, linked_accounts, possible_mcas):
+
+def write_basic_summary_pdf(
+    debtor_name, summary_path, processor_totals, total_income, linked_accounts, possible_mcas
+):
     c = canvas.Canvas(str(summary_path), pagesize=letter)
     width, height = letter
     margin = 40
@@ -436,15 +511,26 @@ def write_basic_summary_pdf(debtor_name, summary_path, processor_totals, total_i
 
     c.save()
 
+
 def wrap_pdf_line(text, width=100):
     import textwrap
+
     return textwrap.wrap(text, width=width)
+
 
 if __name__ == "__main__":
     import config
+
     openai_api_key = config.openai_api_key
     files = sys.argv[1:]
     if not files:
         print("Usage: python bank_analyzer.py file1.pdf [file2.pdf ...]")
         sys.exit(1)
     process_bank_statements_full(files, openai_api_key)
+# === Compatibility shim: provide extract_text_from_pdf for ai_analysis ===
+# Safe to add even if a similar function already exists.
+
+try:
+    import fitz  # PyMuPDF
+except Exception as _e:
+    fitz = None  # handled below

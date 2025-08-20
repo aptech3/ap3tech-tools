@@ -1,0 +1,37 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+  ".git",
+  ".rsg",
+  ".venv",
+  "venv",
+  "env",
+  "**/__pycache__",
+  "build",
+  "dist",
+  ".mypy_cache",
+  ".pytest_cache",
+]
+
+[tool.ruff.lint]
+# Keep rules minimal for now; we'll ratchet up later.
+select = ["E", "F", "I"]
+# Silence long-line errors while we stabilize.
+ignore = ["E203", "E266", "E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+# Keep mypy out of local envs & caches
+exclude = "(^\\.rsg/|^\\.venv/|^venv/|^env/|/site-packages/|^build/|^dist/|^\\.mypy_cache/|^\\.pytest_cache/)"
+# IMPORTANT: remove "files = [...]" here to avoid duplicates; we'll pass targets via pre-commit args
+explicit_package_bases = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q --disable-warnings --maxfail=1"
+testpaths = ["tests"]
