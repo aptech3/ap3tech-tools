@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (placeholder)
 
 ---
+## [1.0.1] - 2025-08-20
+### Removed
+- **main_app_pyqt.py**
+  - Removed the file and will create a new branch with UI on new release
 
 ## [1.0.1] - 2025-08-20
 ### Fixed

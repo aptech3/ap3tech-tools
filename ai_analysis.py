@@ -107,7 +107,7 @@ def clean_for_pdf(text: str) -> str:
 def _chat_completion(
     api_key: str,
     model: str,
-    messages: List[Dict[str, Any]],
+    messages: Any,
     max_tokens: int = 512,
     temperature: float = 0.1,
 ):
