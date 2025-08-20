@@ -1,52 +1,99 @@
 import os
 import re
-import fitz  # PyMuPDF
 from datetime import datetime
-from pdf2image import convert_from_path
+
+import fitz  # PyMuPDF
 import pytesseract
+from pdf2image import convert_from_path
 
 # --- CATEGORY KEYWORDS ---
-UCC_KEYWORDS = ["ucc financing statement", "form ucc1", "secured party", "debtor", "Adlai Stevenson"]
-CONTRACT_KEYWORDS = [
-    "revenue based financing agreement"
+UCC_KEYWORDS = [
+    "ucc financing statement",
+    "form ucc1",
+    "secured party",
+    "debtor",
+    "Adlai Stevenson",
 ]
+CONTRACT_KEYWORDS = ["revenue based financing agreement"]
 CLIENT_NOTE_KEYWORDS = [
-    "risk note", "deal note", "refinance note", "advance request note", 
-    "the account status has changed"
+    "risk note",
+    "deal note",
+    "refinance note",
+    "advance request note",
+    "the account status has changed",
 ]
 BANK_STATEMENT_KEYWORDS = [
-    "bank of america", "chase", "wells fargo", "td bank",
-    "ending balance", "available balance", "posted transactions", "decisionlogic",
-    "statement period", "account summary", "beginning balance"
+    "bank of america",
+    "chase",
+    "wells fargo",
+    "td bank",
+    "ending balance",
+    "available balance",
+    "posted transactions",
+    "decisionlogic",
+    "statement period",
+    "account summary",
+    "beginning balance",
 ]
 
 # --- HEURISTICS ---
 CONTRACT_PAGE_COUNT = 10
 UNIQUE_NOTE_KEYWORDS = [
-    "advised", "communicated", "comm ", "response", "to me", "to collectionsmgt",
-    "an sms was received", "called", "forwarded message", "spoke with", "sw ", "voicemail", "vm"
+    "advised",
+    "communicated",
+    "comm ",
+    "response",
+    "to me",
+    "to collectionsmgt",
+    "an sms was received",
+    "called",
+    "forwarded message",
+    "spoke with",
+    "sw ",
+    "voicemail",
+    "vm",
 ]
 EXCLUDE_NOTE_PHRASES = [
-    "reaching out every other day", "bulk", "contact type: called", "various channels", "@everestbusinessfunding.com",
-    "email blast sent", "---------- forwarded message --------- from: ", "@vadermountainfunding.com",
-    "@pmfus.com", "@ev-bf.com", "@vadermountaincapital.com", "@premiummerchantfunding.com",
-    "please be advised that a ucc lien fee", "@whetstoneholdings.com", "@ev-",
-    "@machfunding.com", "@machcapitalent.com", "@teamgccap.com", "@trustfi.com",
-    "reaching out weekly", "dedicated portal update", "prompt response"
+    "reaching out every other day",
+    "bulk",
+    "contact type: called",
+    "various channels",
+    "@everestbusinessfunding.com",
+    "email blast sent",
+    "---------- forwarded message --------- from: ",
+    "@vadermountainfunding.com",
+    "@pmfus.com",
+    "@ev-bf.com",
+    "@vadermountaincapital.com",
+    "@premiummerchantfunding.com",
+    "please be advised that a ucc lien fee",
+    "@whetstoneholdings.com",
+    "@ev-",
+    "@machfunding.com",
+    "@machcapitalent.com",
+    "@teamgccap.com",
+    "@trustfi.com",
+    "reaching out weekly",
+    "dedicated portal update",
+    "prompt response",
 ]
 EMAIL_EXCLUSION_PATTERNS = [
-    "@everestbusinessfunding.com", "@vadermountainfunding.com", "@pmfus.com",
-    "@ev-bf.com", "@vadermountaincapital.com", "@premiummerchantfunding.com",
-    "@whetstoneholdings.com", "@ev-",
-    "@machfunding.com", "@machcapitalent.com", "@teamgccap.com", "@trustfi.com"
+    "@everestbusinessfunding.com",
+    "@vadermountainfunding.com",
+    "@pmfus.com",
+    "@ev-bf.com",
+    "@vadermountaincapital.com",
+    "@premiummerchantfunding.com",
+    "@whetstoneholdings.com",
+    "@ev-",
+    "@machfunding.com",
+    "@machcapitalent.com",
+    "@teamgccap.com",
+    "@trustfi.com",
 ]
 
 # --- HEADERS TO IGNORE IN HIGHLIGHTING ---
-HEADER_LINES = [
-    "POSSIBLE EMAIL ADDRESSES:",
-    "PHONE NUMBERS:",
-    "CLIENT NOTES:"
-]
+HEADER_LINES = ["POSSIBLE EMAIL ADDRESSES:", "PHONE NUMBERS:", "CLIENT NOTES:"]
 
 # --- COLOR & STYLE RULES ---
 COLOR_RULES = [
@@ -56,23 +103,27 @@ COLOR_RULES = [
         "color": (1, 0, 0),  # Red
         "bold": True,
         "italic": True,
-        "font_size": 13
+        "font_size": 13,
     },
     {
         "name": "comms",
-        "pattern": re.compile(r"talked to|spoke to|said|answered|hung up|advised|minutes ago|received", re.I),
+        "pattern": re.compile(
+            r"talked to|spoke to|said|answered|hung up|advised|minutes ago|received", re.I
+        ),
         "color": (1, 0.55, 0),  # Orange
         "bold": True,
         "italic": True,
-        "font_size": 10
+        "font_size": 10,
     },
     {
         "name": "money",
-        "pattern": re.compile(r"(\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\\b\d{1,3}(?:,\d{3})*\.\d{2}\b)"),
+        "pattern": re.compile(
+            r"(\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\\b\d{1,3}(?:,\d{3})*\.\d{2}\b)"
+        ),
         "color": (0, 0.5, 0),  # Green
         "bold": True,
         "italic": False,
-        "font_size": 13
+        "font_size": 13,
     },
     {
         "name": "drc",
@@ -80,9 +131,10 @@ COLOR_RULES = [
         "color": (0, 0, 1),  # Blue
         "bold": True,
         "italic": True,
-        "font_size": 13
+        "font_size": 13,
     },
 ]
+
 
 def colorize_line(line):
     """
@@ -101,22 +153,25 @@ def colorize_line(line):
                 match_rule = rule
         if match_obj and match_obj.start() > i:
             # Non-matching part before (add None for keyword_type)
-            results.append((line[i:match_obj.start()], None, False, False, 10, None))
+            results.append((line[i : match_obj.start()], None, False, False, 10, None))
             i = match_obj.start()
         if match_obj:
-            results.append((
-                line[match_obj.start():match_obj.end()],
-                match_rule["color"],
-                match_rule["bold"],
-                match_rule["italic"],
-                match_rule["font_size"],
-                match_rule["name"],  # <--- the type ("comms", "lawyer", etc)
-            ))
+            results.append(
+                (
+                    line[match_obj.start() : match_obj.end()],
+                    match_rule["color"],
+                    match_rule["bold"],
+                    match_rule["italic"],
+                    match_rule["font_size"],
+                    match_rule["name"],  # <--- the type ("comms", "lawyer", etc)
+                )
+            )
             i = match_obj.end()
         else:
             results.append((line[i:], None, False, False, 10, None))
             break
     return results
+
 
 # --- MAIN SPLITTING FUNCTION ---
 def split_recovery_pdf(filepath, output_dir=None):
@@ -125,7 +180,9 @@ def split_recovery_pdf(filepath, output_dir=None):
     if not merchant_name:
         merchant_name = f"UnknownMerchant_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    save_dir = os.path.join(output_dir or os.path.dirname(filepath), title_case_filename(merchant_name))
+    save_dir = os.path.join(
+        output_dir or os.path.dirname(filepath), title_case_filename(merchant_name)
+    )
     os.makedirs(save_dir, exist_ok=True)
 
     categorized_pages = {
@@ -134,13 +191,24 @@ def split_recovery_pdf(filepath, output_dir=None):
         "client_notes_raw": [],
         "bank_statements": [],
         "transaction_history": [],
-        "other": []
+        "other": [],
     }
 
-    contract_start = next((i for i, page in enumerate(doc) if "revenue based financing agreement" in page.get_text().lower()), None)
-    contract_pages = list(range(contract_start, contract_start + 10)) if contract_start is not None else []
+    contract_start = next(
+        (
+            i
+            for i, page in enumerate(doc)
+            if "revenue based financing agreement" in page.get_text().lower()
+        ),
+        None,
+    )
+    contract_pages = (
+        list(range(contract_start, contract_start + 10)) if contract_start is not None else []
+    )
 
-    recovery_copy_path = os.path.join(save_dir, f"{title_case_filename(merchant_name)} Recovery.pdf")
+    recovery_copy_path = os.path.join(
+        save_dir, f"{title_case_filename(merchant_name)} Recovery.pdf"
+    )
     save_pages_to_pdf(doc, list(range(len(doc))), recovery_copy_path)
 
     excluded_pages = set(contract_pages)
@@ -150,10 +218,12 @@ def split_recovery_pdf(filepath, output_dir=None):
             continue
         text = page.get_text()
         if not text.strip():
-            image = convert_from_path(filepath, first_page=i+1, last_page=i+1)[0]
+            image = convert_from_path(filepath, first_page=i + 1, last_page=i + 1)[0]
             text = pytesseract.image_to_string(image)
         text = text.lower()
-        if "ach works" in text and ("employee system" in text or "employeesystem" in text or "employee\nsystem" in text):
+        if "ach works" in text and (
+            "employee system" in text or "employeesystem" in text or "employee\nsystem" in text
+        ):
             categorized_pages["transaction_history"].append(i)
             continue
         page_type = classify_page(text)
@@ -197,24 +267,23 @@ def split_recovery_pdf(filepath, output_dir=None):
             text = doc[i].get_text()
             lines = text.splitlines()
             for j, line in enumerate(lines):
-                line = line.encode('ascii', 'ignore').decode('ascii')
+                line = line.encode("ascii", "ignore").decode("ascii")
                 email_matches = re.findall(r"[\w\.-]+@[\w\.-]+", line)
                 for email in email_matches:
-                    if (
-                        not any(email.lower().endswith(skip) for skip in EMAIL_EXCLUSION_PATTERNS)
-                        and not any(skip in email.lower() for skip in EMAIL_EXCLUSION_PATTERNS)
-                    ):
+                    if not any(
+                        email.lower().endswith(skip) for skip in EMAIL_EXCLUSION_PATTERNS
+                    ) and not any(skip in email.lower() for skip in EMAIL_EXCLUSION_PATTERNS):
                         emails.add(email.lower())
                 if any(keyword in line.lower() for keyword in UNIQUE_NOTE_KEYWORDS):
                     if not any(ex in line.lower() for ex in EXCLUDE_NOTE_PHRASES):
-                        buffer = "\n".join(lines[j:j+3])
+                        buffer = "\n".join(lines[j : j + 3])
                         timestamp = extract_datetime_from_text(buffer)
                         parsed_notes.append(f"{timestamp} - {line.strip()}")
         phones = set()
         for note in parsed_notes:
-            note_phone_matches = re.findall(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', note)
+            note_phone_matches = re.findall(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}", note)
             for match in note_phone_matches:
-                digits = re.sub(r'\D', '', match)
+                digits = re.sub(r"\D", "", match)
                 if len(digits) == 10:
                     phones.add(digits)
         unique_digits = sorted(phones)
@@ -228,12 +297,15 @@ def split_recovery_pdf(filepath, output_dir=None):
             *[phone for phone in formatted_phones],
             "",
             "CLIENT NOTES:",
-            *[note for note in parsed_notes]
+            *[note for note in parsed_notes],
         ]
 
-        notes_output_path = os.path.join(save_dir, f"{title_case_filename(merchant_name)} Client Notes Parsed.pdf")
+        notes_output_path = os.path.join(
+            save_dir, f"{title_case_filename(merchant_name)} Client Notes Parsed.pdf"
+        )
         render_colored_pdf(lines, notes_output_path)
     return save_dir
+
 
 def render_colored_pdf(lines, output_path):
     doc = fitz.open()
@@ -251,7 +323,9 @@ def render_colored_pdf(lines, output_path):
             run = [(line, color, False, False, font_size, font_name)]
         else:
             run = []
-            for text, color, bold, italic, font_size, keyword_type in colorize_line(line):  # note extra return
+            for text, color, bold, italic, font_size, keyword_type in colorize_line(
+                line
+            ):  # note extra return
                 # Only bump font size for money/lawyer/DRC, not comms (orange)
                 if keyword_type == "comms":
                     eff_size = font_size  # no size bump for comms/orange
@@ -268,7 +342,10 @@ def render_colored_pdf(lines, output_path):
             if color is None:
                 color = (0, 0, 0)
             # Wrap text if it exceeds line width
-            if fitz.get_text_length(text, fontsize=font_size, fontname=font_name) + x > margin + max_width:
+            if (
+                fitz.get_text_length(text, fontsize=font_size, fontname=font_name) + x
+                > margin + max_width
+            ):
                 y += font_size + 2
                 x = margin
             page.insert_text((x, y), text, fontsize=font_size, fontname=font_name, color=color)
@@ -280,6 +357,7 @@ def render_colored_pdf(lines, output_path):
     doc.save(output_path)
     doc.close()
 
+
 def extract_merchant_name(doc):
     first_page_text = doc[0].get_text()
     match = re.search(r"Business Name:\s*([^\n]+)", first_page_text, re.IGNORECASE)
@@ -287,20 +365,23 @@ def extract_merchant_name(doc):
         return sanitize_filename(match.group(1).strip())
     return None
 
+
 def sanitize_filename(name):
-    return re.sub(r'[\\/*?:"<>|]', '', name)
+    return re.sub(r'[\\/*?:"<>|]', "", name)
+
 
 def title_case_filename(name):
-    acronyms = {'LLC', 'INC', 'CORP', 'DBA', 'NYC', 'USA', 'LLP', 'TV'}
+    acronyms = {"LLC", "INC", "CORP", "DBA", "NYC", "USA", "LLP", "TV"}
     words = name.split()
     result = []
     for word in words:
-        clean = re.sub(r'[^a-zA-Z]', '', word)
+        clean = re.sub(r"[^a-zA-Z]", "", word)
         if clean.upper() in acronyms:
             result.append(word.upper())
         else:
             result.append(word.capitalize())
-    return ' '.join(result)
+    return " ".join(result)
+
 
 def classify_page(text):
     text = text.lower()
@@ -316,6 +397,7 @@ def classify_page(text):
         return "bank_statements"
     return "other"
 
+
 def save_pages_to_pdf(doc, page_numbers, output_path):
     new_doc = fitz.open()
     for page_num in sorted(page_numbers):
@@ -323,28 +405,39 @@ def save_pages_to_pdf(doc, page_numbers, output_path):
     new_doc.save(output_path)
     new_doc.close()
 
+
 def extract_datetime_from_text(text):
-    match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})[\s\n]+(\d{1,2}:\d{2}\s?(AM|PM|am|pm))', text)
+    match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})[\s\n]+(\d{1,2}:\d{2}\s?(AM|PM|am|pm))", text)
     if match:
         return f"{match.group(1)}"
-    match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', text)
+    match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", text)
     if match:
         return match.group(1)
     return ""
 
+
 HIGHLIGHT_KEYWORDS = [
-    "talked to", "spoke to", "said", "answered", "hung up", "advised", "minutes ago", "received"
+    "talked to",
+    "spoke to",
+    "said",
+    "answered",
+    "hung up",
+    "advised",
+    "minutes ago",
+    "received",
 ]
 
-DATE_PATTERN = re.compile(r'(\d{1,2}/\d{1,2}/\d{4})')
+DATE_PATTERN = re.compile(r"(\d{1,2}/\d{1,2}/\d{4})")
+
 
 def highlight_notes_in_pdf(doc, page_num):
     page = doc[page_num]
-    text_instances = []
     blocks = page.get_text("blocks")
 
     # Store (y, text, rect) for each block
-    line_data = [(b[1], b[4].strip(), fitz.Rect(b[:4])) for b in blocks if len(b) >= 5 and b[4].strip()]
+    line_data = [
+        (b[1], b[4].strip(), fitz.Rect(b[:4])) for b in blocks if len(b) >= 5 and b[4].strip()
+    ]
     line_data.sort()  # sort top-to-bottom
 
     lines = [t for _, t, _ in line_data]
@@ -373,6 +466,4 @@ def highlight_notes_in_pdf(doc, page_num):
                 highlight.update()
                 highlighted_indices.add(i)
 
-
     return doc
-        

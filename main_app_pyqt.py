@@ -29,28 +29,28 @@ Ensure that PyQt5 is installed (see `requirements.txt`).
 
 import os
 import sys
-from typing import List
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QLabel,
     QFileDialog,
     QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
     QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtGui import QPixmap
+
+import ai_analysis  # type: ignore
 
 # Import application logic modules.  These modules are part of the existing
 # codebase and provide the core PDF processing functions.  They may rely
 # on configuration values (e.g. OpenAI API keys) from a `config` module.
 import bank_analyzer
-import ai_analysis  # type: ignore
 
 
 def get_openai_key() -> str:
@@ -115,7 +115,7 @@ class AnalyzerThread(QThread):
 
     finished = pyqtSignal()
 
-    def __init__(self, files: List[str], mode: str) -> None:
+    def __init__(self, files: list[str], mode: str) -> None:
         super().__init__()
         self.files = files
         self.mode = mode
@@ -232,7 +232,9 @@ class MainWindow(QMainWindow):
         self.sidebar_layout.addSpacing(12)
 
         # Section heading
-        section_label_text = {"admin": "Admin", "collections": "Collections", "sales": "Sales"}.get(mode, "")
+        section_label_text = {"admin": "Admin", "collections": "Collections", "sales": "Sales"}.get(
+            mode, ""
+        )
         if section_label_text:
             header = QLabel(section_label_text)
             header.setStyleSheet("font-size: 18px; font-weight: bold; color: #0075c6;")
@@ -567,15 +569,12 @@ class MainWindow(QMainWindow):
 
     def _browse_files(self, mode: str) -> None:
         files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Bank Statement PDFs",
-            os.getcwd(),
-            "PDF Files (*.pdf)"
+            self, "Select Bank Statement PDFs", os.getcwd(), "PDF Files (*.pdf)"
         )
         if files:
             self._process_files(files, mode)
 
-    def _process_files(self, files: List[str], mode: str) -> None:
+    def _process_files(self, files: list[str], mode: str) -> None:
         # Update status bar
         action = "Analyzing" if mode == "ai" else "Processing"
         self.status_label.setText(f"{action} {len(files)} file(s)…")

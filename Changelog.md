@@ -1,6 +1,5 @@
 # Changelog
 All notable changes to this project will be documented in this file.
-
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -16,37 +15,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0] - 2025-08-19
+## [1.0.1] - 2025-08-20
+### Fixed
+- **ai_analysis.py**
+  - Removed conditional redefinitions and all `type: ignore` comments that caused mypy noise.
+  - Added a version-tolerant OpenAI chat wrapper (works with both new `OpenAI` client and legacy `ChatCompletion`).
+  - Fixed a stray f-string brace in the summary filename.
+- **bank_analyzer.py**
+  - Renamed ambiguous variable `l` to `line_lower` (ruff E741).
+  - Removed a duplicate `extract_text_from_pdf` definition (ruff F811).
+- **utils/pdf_utils.py**
+  - Reworked `compress_pdf` to be PyMuPDF-version-safe and reliable: now rasterizes each page to JPEG at a controlled DPI and quality (consistent size reduction across versions).
+
 ### Added
-- **PDF compression utility**: `utils/pdf_utils.py` with `compress_pdf()` to reduce lien notice PDF sizes for Stripe’s **≤10 MB** upload limit (Fixes **#2**).
-  - Downscales high‑DPI embedded images (default floor: **144 DPI**).
-  - Re-encodes images to JPEG with configurable quality (default **75**).
-  - Cleans/deflates objects on save to minimize size.
-  - Safe defaults targeting ~**9.5 MB** ceiling; parameters allow stricter settings.
-- **CLI entry** for ad‑hoc use:
-  - `python -m utils.pdf_utils input.pdf --dpi 144 --quality 75 --target-mb 9.5`
-- **Integration point**: helper function `finalize_and_prepare_for_stripe(pdf_path)` (in `main_app.py`) now invokes compression after PDF generation/selection.
+- **Tests**
+  - `tests/test_pdf_compress_large.py`: creates a large image PDF and asserts ≥20% size reduction after compression.
+  - `tests/test_ai_analysis_parse.py`: smoke tests for parsing/summing helpers in `ai_analysis`.
+  - `tests/conftest.py`: ensures the project root is on `sys.path` for imports during tests.
 
 ### Changed
-- None.
+- **Compression behavior**
+  - `compress_pdf` keeps the same signature but now rasterizes pages for predictable results.
+    _Note_: Rasterization makes text non-selectable (appropriate for scanned statements). If vector/text preservation is needed later, we can add an alternate non-raster path behind a flag.
 
-### Fixed
-- Large lien notices previously exceeding Stripe’s 10 MB limit now compress automatically, avoiding manual splitting/uploads (**#2**).
-
-### Tests
-- **Smoke test** `tests/test_pdf_compress.py`:
-  - Ensures compression runs and does not increase file size.
-  - Uses a small fixture (`tests/fixtures/sample_scanned.pdf`) if available; otherwise skips gracefully.
-- **CLI smoke** `tests/test_cli.py`:
-  - Verifies `--help` runs successfully.
+### Tooling
+- **pre-commit / mypy**
+  - mypy hook uses `pass_filenames: false` with explicit targets to avoid duplicate-module scans.
+- **pyproject**
+  - Moved Ruff config to `[tool.ruff.lint]`, kept rules focused (`E`, `F`, `I`) while stabilizing.
+  - mypy set to Python 3.11 with sensible excludes (local venvs, caches).
 
 ### Docs
-- Added usage notes in code docstrings and CLI help.
-- (Recommend) Add a short “PDF Compression” section to `README.md` with CLI and API examples.
+- Recommend targeting **Python 3.11** so PyMuPDF installs from wheels (no native build).
 
-### Notes for Upgraders
-- No breaking changes; new utility is opt‑in unless wired into your finalize flow.
-- For more aggressive size reduction, rerun with `--dpi 120 --quality 65`.
+## [1.0.0] - 2025-08-19
+### Added
+- Initial release of the tools and baseline analysis workflow.
 
-[Unreleased]: https://github.com/aptech3/ap3tech-tools/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/aptech3/ap3tech-tools/releases/tag/v1.0.0
+[Unreleased]: https://github.com/aptech3/ap3te

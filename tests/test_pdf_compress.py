@@ -1,10 +1,12 @@
 import os
 import shutil
-import tempfile
+
 from utils.pdf_utils import compress_pdf
 
-def _size_mb(path): 
-    return os.path.getsize(path) / (1024*1024)
+
+def _size_mb(path):
+    return os.path.getsize(path) / (1024 * 1024)
+
 
 def test_compress_pdf_smoke(tmp_path):
     """
@@ -18,6 +20,7 @@ def test_compress_pdf_smoke(tmp_path):
     if not os.path.exists(src):
         # Allow skipping if fixture not present in early phases
         import pytest
+
         pytest.skip("Fixture missing: tests/fixtures/sample_scanned.pdf")
 
     dst = tmp_path / "sample_scanned.pdf"
