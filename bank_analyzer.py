@@ -448,3 +448,42 @@ if __name__ == "__main__":
         print("Usage: python bank_analyzer.py file1.pdf [file2.pdf ...]")
         sys.exit(1)
     process_bank_statements_full(files, openai_api_key)
+# === Compatibility shim: provide extract_text_from_pdf for ai_analysis ===
+# Safe to add even if a similar function already exists.
+from typing import Optional, List
+try:
+  import fitz # PyMuPDF
+except Exception as _e:
+  fitz = None # handled below
+  
+  
+def extract_text_from_pdf(pdf_path: str,
+                          *,
+                            max_pages: Optional[int] = None,
+                            join_with: str = "\n\n") -> str:
+    """
+    Minimal, dependency-light text extraction used by ai_analysis.
+    - Uses PyMuPDF if available (fast, layout-aware enough for our use).
+    - No OCR here on purpose; ai_analysis can decide when to OCR.
+    """
+    if fitz is None:
+        # Lazy import fallback in case the main module imported fitz differently
+        try:
+            import fitz as _fitz
+        except Exception as e: # pragma: no cover
+            raise RuntimeError(
+                "PyMuPDF (fitz) not available for extract_text_from_pdf; "
+                "install 'pymupdf' or update ai_analysis to use the non-OCR path."
+            ) from e
+        else:
+            globals()["fitz"] = _fitz
+        doc = fitz.open(pdf_path)
+    try:
+        chunks: List[str] = []
+        for i, page in enumerate(doc):
+            if max_pages is not None and i >= max_pages:
+                break
+            chunks.append(page.get_text("text"))
+            return join_with.join(chunks)
+    finally:
+       doc.close()

@@ -2,11 +2,18 @@ import re
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import openai
-from bank_analyzer import (
-    extract_company_name,
-    extract_text_from_pdf,
-    get_statement_subfolder,
-)
+try: 
+    from bank_analyzer import extract_text_from_pdf
+except Exception:
+    # Fallbacks if the analyzer exposes different names
+    try:
+        from bank_analyzer import extract_text as extract_text_from_pdf
+# type: ignore 
+    except Exception:
+        # Last resort: delayed import to avoid hard failure on module import 
+        def extract_text_from_pdf(path: str) -> str: 
+            from bank_analyzer import extract_text_from_pdf as _impl # may exist at runtime?
+            return _imp(path)
 import bsa_settings
 import os
 from collections import defaultdict
