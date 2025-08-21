@@ -42,20 +42,26 @@ jobs:
         run: python -m pytest -q
 
 
-      - name: Build app (PyInstaller)
+      - name: Show dist tree (debug)
+        shell: pwsh
         run: |
-          pyinstaller main_app.spec --noconfirm --clean
+          if (Test-Path dist) { Get-ChildItem -Recurse dist | Format-Table -AutoSize } else { Write-Host "dist not found" }
+
+      - name: Find PyInstaller output folder
+        id: find_dist
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem dist -Directory | Select-Object -First 1 -ExpandProperty Name
+          if (-not $dir) { throw "No directories found under dist/" }
+          "dist_name=$dir" >> $env:GITHUB_OUTPUT
+          Write-Host "Detected dist folder: $dir"
 
       - name: Zip artifact
+        shell: pwsh
         run: |
-          cd dist
-          7z a RSG-Recovery-Tools-${{ github.ref_name }}-${{ runner.os }}.zip "RSG-Recovery-Tools/*"
-
-      - name: Upload build artifact (CI record)
-        uses: actions/upload-artifact@v4
-        with:
-          name: RSG-Recovery-Tools-${{ github.ref_name }}-${{ runner.os }}
-          path: dist/RSG-Recovery-Tools-${{ github.ref_name }}-${{ runner.os }}.zip
+          $ZipName = "RSG-Recovery-Tools-${{ github.ref_name }}-Windows.zip"
+          $Source  = "dist/${{ steps.find_dist.outputs.dist_name }}/*"
+          Compress-Archive -Path $Source -DestinationPath "dist/$ZipName" -Force
 
   release:
     needs: build
