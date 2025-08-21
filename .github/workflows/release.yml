@@ -41,6 +41,12 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+      - name: Build app (PyInstaller)
+        shell: pwsh
+        run: |
+          pyinstaller main_app.spec --noconfirm --clean `
+            --distpath dist `
+            --workpath build\pyi_build
 
       - name: Show dist tree (debug)
         shell: pwsh
