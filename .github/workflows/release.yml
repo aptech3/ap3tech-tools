@@ -44,7 +44,7 @@ jobs:
 
       - name: Build app (PyInstaller)
         run: |
-          pyinstaller build/main_app.spec --noconfirm --clean
+          pyinstaller main_app.spec --noconfirm --clean
 
       - name: Zip artifact
         run: |
