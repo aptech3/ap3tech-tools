@@ -194,7 +194,8 @@ def sum_deposits_and_accounts(
     for proc in processors:
         pattern = rf"{re.escape(proc)}.*?\$?([\d,]+\.\d\d)"
         amounts = [
-            float(m.replace(",", "").replace("$", "")) for m in re.findall(pattern, text, re.I)
+            float(m.replace(",", "").replace("$", ""))
+            for m in re.findall(pattern, text, re.I)
         ]
         total = round(sum(amounts), 2)
         processor_totals[proc] = total
@@ -213,12 +214,21 @@ def sum_deposits_and_accounts(
         for line in text.splitlines():
             if acct in line:
                 line_lower = line.lower()
-                if any(w in line_lower for w in ["deposit", "credit", "received", "payment from"]):
+                if any(
+                    w in line_lower
+                    for w in ["deposit", "credit", "received", "payment from"]
+                ):
                     direction = "In"
                     break
                 if any(
                     w in line_lower
-                    for w in ["withdrawal", "debit", "payment to", "purchase", "sent to"]
+                    for w in [
+                        "withdrawal",
+                        "debit",
+                        "payment to",
+                        "purchase",
+                        "sent to",
+                    ]
                 ):
                     direction = "Out"
                     break
@@ -232,7 +242,9 @@ def sum_deposits_and_accounts(
 _DEF_MODEL = "gpt-4-turbo"  # change to "gpt-4o-mini" if preferred
 
 
-def gpt_extract_entities(openai_api_key: str, ocr_text: str) -> Tuple[List[str], List[str]]:
+def gpt_extract_entities(
+    openai_api_key: str, ocr_text: str
+) -> Tuple[List[str], List[str]]:
     """Use GPT ONLY to list merchant processors and account last-4s seen in the statement."""
     prompt = (
         "From the bank statement text below, do NOT provide any totals or percentages.\n"
@@ -293,7 +305,9 @@ def gpt_extract_entities(openai_api_key: str, ocr_text: str) -> Tuple[List[str],
     return procs, accts
 
 
-def gpt_analyze_bank_statement(pdf_path: str, openai_api_key: str, subfolder: Path) -> str:
+def gpt_analyze_bank_statement(
+    pdf_path: str, openai_api_key: str, subfolder: Path
+) -> str:
     company_name = extract_company_name(pdf_path)
     ocr_text = extract_text_from_pdf(pdf_path)
 

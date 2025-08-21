@@ -1,44 +1,38 @@
-# -*- mode: python ; coding: utf-8 -*-
+# main_app.spec
+import os
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.building.build_main import Analysis, PYZ, EXE
 
+# Hidden imports that PyInstaller may miss
+hiddenimports = []
+hiddenimports += collect_submodules("customtkinter")
+hiddenimports += collect_submodules("tkinterdnd2")
+
+# Data files (include tkdnd assets and logo if present)
+datas = []
+datas += collect_data_files("tkinterdnd2")  # needed for drag & drop
+if os.path.exists("logo.png"):
+    datas.append(("logo.png", "."))  # app will look for it in CWD
 
 a = Analysis(
-    ['main_app.py'],
+    ["main_app.py"],
     pathex=[],
     binaries=[],
-    datas=[('poppler/Library/bin', 'poppler/Library/bin'), ('tesseract/tesseract.exe', 'tesseract/tesseract.exe'), ('tesseract/tessdata', 'tesseract/tessdata')],
-    hiddenimports=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
-    hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
-    optimize=0,
 )
-pyz = PYZ(a.pure)
-
+pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 exe = EXE(
     pyz,
     a.scripts,
-    [],
-    exclude_binaries=True,
-    name='main_app',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=True,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-)
-coll = COLLECT(
-    exe,
     a.binaries,
+    a.zipfiles,
     a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='main_app',
+    name="RSG-Recovery-Tools",
+    console=False,     # GUI app
+    # icon="app.ico",  # uncomment if you have one
 )

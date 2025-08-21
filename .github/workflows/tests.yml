@@ -1,0 +1,40 @@
+name: tests
+on:
+  push:
+    branches: [ pre-prod, main ]
+  pull_request:
+    branches: [ pre-prod ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Expose the repo secret to your code:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Optional: prevent verbose logging from leaking anything
+      PYTHONWARNINGS: "ignore"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dev deps
+        run: pip install -r requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          # If you use dotenv locally, it's harmless to install here too:
+          pip install python-dotenv
+
+      - name: Run tests
+        run: |
+          # Don't ever echo secrets; just run tests.
+          pytest -q

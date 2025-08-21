@@ -1,0 +1,74 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver version (e.g., 1.0.0)"
+        required: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest]   # add macos-latest if you want a mac build too
+    runs-on: ${{ matrix.os }}
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # if tests need it
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Build app (PyInstaller)
+        run: |
+          pyinstaller build/main_app.spec --noconfirm --clean
+
+      - name: Zip artifact
+        run: |
+          cd dist
+          7z a RSG-Recovery-Tools-${{ github.ref_name }}-${{ runner.os }}.zip "RSG-Recovery-Tools/*"
+
+      - name: Upload build artifact (CI record)
+        uses: actions/upload-artifact@v4
+        with:
+          name: RSG-Recovery-Tools-${{ github.ref_name }}-${{ runner.os }}
+          path: dist/RSG-Recovery-Tools-${{ github.ref_name }}-${{ runner.os }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: RSG-Recovery-Tools-${{ github.ref_name }}-Windows
+          path: ./release_assets
+        # If you add macOS, download that artifact too with another step
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RSG Recovery Tools ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            release_assets/*.zip

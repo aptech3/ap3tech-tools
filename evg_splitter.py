@@ -108,7 +108,8 @@ COLOR_RULES = [
     {
         "name": "comms",
         "pattern": re.compile(
-            r"talked to|spoke to|said|answered|hung up|advised|minutes ago|received", re.I
+            r"talked to|spoke to|said|answered|hung up|advised|minutes ago|received",
+            re.I,
         ),
         "color": (1, 0.55, 0),  # Orange
         "bold": True,
@@ -203,7 +204,9 @@ def split_recovery_pdf(filepath, output_dir=None):
         None,
     )
     contract_pages = (
-        list(range(contract_start, contract_start + 10)) if contract_start is not None else []
+        list(range(contract_start, contract_start + 10))
+        if contract_start is not None
+        else []
     )
 
     recovery_copy_path = os.path.join(
@@ -222,7 +225,9 @@ def split_recovery_pdf(filepath, output_dir=None):
             text = pytesseract.image_to_string(image)
         text = text.lower()
         if "ach works" in text and (
-            "employee system" in text or "employeesystem" in text or "employee\nsystem" in text
+            "employee system" in text
+            or "employeesystem" in text
+            or "employee\nsystem" in text
         ):
             categorized_pages["transaction_history"].append(i)
             continue
@@ -245,10 +250,18 @@ def split_recovery_pdf(filepath, output_dir=None):
             pdf_path = os.path.join(save_dir, filename)
             save_pages_to_pdf(doc, contract_pages, pdf_path)
 
-    categorized_pages["ucc"] = [p for p in categorized_pages["ucc"] if p not in excluded_pages]
+    categorized_pages["ucc"] = [
+        p for p in categorized_pages["ucc"] if p not in excluded_pages
+    ]
 
     known_pages = set()
-    for cat in ["contract", "ucc", "client_notes_raw", "bank_statements", "transaction_history"]:
+    for cat in [
+        "contract",
+        "ucc",
+        "client_notes_raw",
+        "bank_statements",
+        "transaction_history",
+    ]:
         known_pages.update(categorized_pages[cat])
     categorized_pages["other"] = [i for i in range(len(doc)) if i not in known_pages]
 
@@ -271,8 +284,11 @@ def split_recovery_pdf(filepath, output_dir=None):
                 email_matches = re.findall(r"[\w\.-]+@[\w\.-]+", line)
                 for email in email_matches:
                     if not any(
-                        email.lower().endswith(skip) for skip in EMAIL_EXCLUSION_PATTERNS
-                    ) and not any(skip in email.lower() for skip in EMAIL_EXCLUSION_PATTERNS):
+                        email.lower().endswith(skip)
+                        for skip in EMAIL_EXCLUSION_PATTERNS
+                    ) and not any(
+                        skip in email.lower() for skip in EMAIL_EXCLUSION_PATTERNS
+                    ):
                         emails.add(email.lower())
                 if any(keyword in line.lower() for keyword in UNIQUE_NOTE_KEYWORDS):
                     if not any(ex in line.lower() for ex in EXCLUDE_NOTE_PHRASES):
@@ -281,7 +297,9 @@ def split_recovery_pdf(filepath, output_dir=None):
                         parsed_notes.append(f"{timestamp} - {line.strip()}")
         phones = set()
         for note in parsed_notes:
-            note_phone_matches = re.findall(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}", note)
+            note_phone_matches = re.findall(
+                r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}", note
+            )
             for match in note_phone_matches:
                 digits = re.sub(r"\D", "", match)
                 if len(digits) == 10:
@@ -348,7 +366,9 @@ def render_colored_pdf(lines, output_path):
             ):
                 y += font_size + 2
                 x = margin
-            page.insert_text((x, y), text, fontsize=font_size, fontname=font_name, color=color)
+            page.insert_text(
+                (x, y), text, fontsize=font_size, fontname=font_name, color=color
+            )
             x += fitz.get_text_length(text, fontsize=font_size, fontname=font_name)
         y += 16 if not is_header else 20
         if y > height - margin:
@@ -407,7 +427,9 @@ def save_pages_to_pdf(doc, page_numbers, output_path):
 
 
 def extract_datetime_from_text(text):
-    match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})[\s\n]+(\d{1,2}:\d{2}\s?(AM|PM|am|pm))", text)
+    match = re.search(
+        r"(\d{1,2}/\d{1,2}/\d{4})[\s\n]+(\d{1,2}:\d{2}\s?(AM|PM|am|pm))", text
+    )
     if match:
         return f"{match.group(1)}"
     match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", text)
@@ -436,7 +458,9 @@ def highlight_notes_in_pdf(doc, page_num):
 
     # Store (y, text, rect) for each block
     line_data = [
-        (b[1], b[4].strip(), fitz.Rect(b[:4])) for b in blocks if len(b) >= 5 and b[4].strip()
+        (b[1], b[4].strip(), fitz.Rect(b[:4]))
+        for b in blocks
+        if len(b) >= 5 and b[4].strip()
     ]
     line_data.sort()  # sort top-to-bottom
 
@@ -460,7 +484,11 @@ def highlight_notes_in_pdf(doc, page_num):
         for i in range(start, end):
             if i in highlighted_indices:
                 continue
-            if rects[i] and lines[i].strip() and lines[i].strip().upper() not in HEADER_LINES:
+            if (
+                rects[i]
+                and lines[i].strip()
+                and lines[i].strip().upper() not in HEADER_LINES
+            ):
                 highlight = page.add_highlight_annot(rects[i])
                 highlight.set_colors(stroke=(1, 1, 0))
                 highlight.update()

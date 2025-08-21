@@ -43,7 +43,8 @@ def get_poppler_path():
     for p in candidates:
         if os.path.isdir(p):
             return p
-    raise FileNotFoundError(f"No Poppler bin folder found in {poppler_root}")
+    # Fall back to system Poppler (None lets pdf2image use PATH on Linux/macOS)
+    return None
 
 
 def get_desktop_output_folder():
@@ -169,7 +170,10 @@ def find_processor_pages(pdf_path, merchant_keywords, debtor_name):
                 # KNOWN merchant processors
                 for keyword in merchant_keywords:
                     keyword_lower = keyword.lower()
-                    if keyword_lower in line_lower and keyword_lower not in seen_normalized:
+                    if (
+                        keyword_lower in line_lower
+                        and keyword_lower not in seen_normalized
+                    ):
                         processor_pages[keyword] = i
                         seen_normalized.add(keyword_lower)
                         break
@@ -231,7 +235,10 @@ def find_processor_pages_with_exclusion(
                 for keyword in merchant_keywords:
                     keyword_lower = keyword.lower()
                     # Exclusion check for known keywords
-                    if keyword_lower in line_lower and keyword_lower not in seen_normalized:
+                    if (
+                        keyword_lower in line_lower
+                        and keyword_lower not in seen_normalized
+                    ):
                         # Fuzzy check against exclusions
                         if is_excluded(keyword_lower, exclusion_keywords):
                             continue
@@ -265,7 +272,7 @@ def save_processor_pages(pdf_path, processor_matches, subfolder):
     company_name = extract_company_name(pdf_path)
     for processor, page_num in processor_matches.items():
         safe_processor = re.sub(r'[\\/:"*?<>|]+', "_", processor)
-        filename = f"{company_name} {safe_processor} p{page_num+1}.pdf"
+        filename = f"{company_name} {safe_processor} p{page_num + 1}.pdf"
         output_path = subfolder / filename
 
         doc = fitz.open(pdf_path)
@@ -359,7 +366,9 @@ def process_bank_statements_full(filepaths, content_frame=None):
 
         # Save only non-excluded pages
         for processor, page_num in all_matches.items():
-            processor_clean = processor.replace("Possible Processor - ", "").lower().strip()
+            processor_clean = (
+                processor.replace("Possible Processor - ", "").lower().strip()
+            )
             if is_excluded(processor_clean):
                 continue
             processor_matches[processor] = page_num
@@ -371,7 +380,9 @@ def process_bank_statements_full(filepaths, content_frame=None):
 
         # Merchant processor summary: one line per processor, total and %
         # (Optionally skip exclusions here too, for extra thoroughness)
-        filtered_processors = [proc for proc in merchant_keywords if not is_excluded(proc)]
+        filtered_processors = [
+            proc for proc in merchant_keywords if not is_excluded(proc)
+        ]
         processor_totals, total_income = summarize_processors(text, filtered_processors)
 
         # Linked accounts: only ones mentioned on transfer/ACH-type lines
@@ -382,7 +393,12 @@ def process_bank_statements_full(filepaths, content_frame=None):
 
         summary_pdf = subfolder / f"{debtor_name} Summary.pdf"
         write_basic_summary_pdf(
-            debtor_name, summary_pdf, processor_totals, total_income, linked_accounts, possible_mcas
+            debtor_name,
+            summary_pdf,
+            processor_totals,
+            total_income,
+            linked_accounts,
+            possible_mcas,
         )
 
 
@@ -469,7 +485,12 @@ def write_processor_summary(c, margin, y, processor_totals, total_income):
 
 
 def write_basic_summary_pdf(
-    debtor_name, summary_path, processor_totals, total_income, linked_accounts, possible_mcas
+    debtor_name,
+    summary_path,
+    processor_totals,
+    total_income,
+    linked_accounts,
+    possible_mcas,
 ):
     c = canvas.Canvas(str(summary_path), pagesize=letter)
     width, height = letter
@@ -519,9 +540,10 @@ def wrap_pdf_line(text, width=100):
 
 
 if __name__ == "__main__":
-    import config
+    import os
 
-    openai_api_key = config.openai_api_key
+    # Grab the key from environment variable
+    openai_api_key = os.getenv("OPENAI_API_KEY")
     files = sys.argv[1:]
     if not files:
         print("Usage: python bank_analyzer.py file1.pdf [file2.pdf ...]")
