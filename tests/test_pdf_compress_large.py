@@ -48,15 +48,19 @@ def test_compress_pdf_large_random_image(tmp_path):
     _make_pdf_with_big_image(str(src_pdf), w=2500, h=2500)
 
     original_size = _mb(str(src_pdf))
-    assert original_size > 1.0, "Synthetic PDF should be >1MB to make the test meaningful"
+    assert original_size > 1.0, (
+        "Synthetic PDF should be >1MB to make the test meaningful"
+    )
 
     # Compress with stricter settings to ensure a visible reduction
-    out_pdf = compress_pdf(str(src_pdf), target_mb=9.5, image_dpi_floor=120, jpeg_quality=65)
+    out_pdf = compress_pdf(
+        str(src_pdf), target_mb=9.5, image_dpi_floor=120, jpeg_quality=65
+    )
     assert os.path.exists(out_pdf)
 
     new_size = _mb(out_pdf)
 
     # Assert: reduced at least 20% (adjust if needed based on your compressor behavior)
-    assert (
-        new_size < original_size * 0.8
-    ), f"Expected at least 20% reduction (was {original_size:.2f} MB -> {new_size:.2f} MB)"
+    assert new_size < original_size * 0.8, (
+        f"Expected at least 20% reduction (was {original_size:.2f} MB -> {new_size:.2f} MB)"
+    )

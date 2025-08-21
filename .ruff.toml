@@ -1,0 +1,17 @@
+# .ruff.toml
+
+# Match Black’s default; keep things consistent
+line-length = 88
+target-version = "py311"
+
+[lint]
+# Enable Ruff’s import-sorting (isort) rules
+extend-select = ["I"]
+
+# You can ignore rules here if needed
+# ignore = []
+
+[format]
+# Use Ruff’s formatter (works great with Black-style code)
+quote-style = "double"
+indent-style = "space"

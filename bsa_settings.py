@@ -85,7 +85,9 @@ def get_merchant_by_id(row_id):
         return None
 
 
-def add_merchant_full(root, name, co="", address="", city="", state="", zip_code="", notes=""):
+def add_merchant_full(
+    root, name, co="", address="", city="", state="", zip_code="", notes=""
+):
     """Add a merchant processor with all fields (no duplicates on name)."""
     conn = connect_db()
     c = conn.cursor()
@@ -159,7 +161,9 @@ def get_all_exclusions_with_ids():
     """Return list of (id, entity, reason, notes) for all exclusions."""
     conn = connect_db()
     c = conn.cursor()
-    c.execute("SELECT id, entity, reason, notes FROM Exclusions ORDER BY entity COLLATE NOCASE")
+    c.execute(
+        "SELECT id, entity, reason, notes FROM Exclusions ORDER BY entity COLLATE NOCASE"
+    )
     result = c.fetchall()
     conn.close()
     return result
@@ -217,7 +221,9 @@ def export_merchants_txt(filepath):
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         # Write header
-        writer.writerow(["root", "name", "co", "address", "city", "state", "zip", "notes"])
+        writer.writerow(
+            ["root", "name", "co", "address", "city", "state", "zip", "notes"]
+        )
         for _, root, name, co, address, city, state, zip_code, notes in merchants:
             writer.writerow([root, name, co, address, city, state, zip_code, notes])
 
@@ -273,7 +279,9 @@ def import_exclusions_txt(filepath):
 def get_suggestions():
     conn = connect_db()
     c = conn.cursor()
-    c.execute("SELECT name, date_found, found_in_file FROM Suggestions ORDER BY date_found DESC")
+    c.execute(
+        "SELECT name, date_found, found_in_file FROM Suggestions ORDER BY date_found DESC"
+    )
     result = c.fetchall()
     conn.close()
     return result

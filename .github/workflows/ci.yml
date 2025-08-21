@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ pre-prod ]
   pull_request:
-    branches: [ main ]
+    branches: [ pre-prod ]
 
 permissions:
   contents: read
@@ -33,6 +33,16 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
+
+      - name: Install Tesseract
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install tesseract
+          else
+            choco install tesseract -y
+          fi
 
       - name: Install runtime deps
         if: hashFiles('requirements.txt') != ''
