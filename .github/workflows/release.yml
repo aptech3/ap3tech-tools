@@ -1,29 +1,43 @@
 name: release
 
 on:
+  push:
+    tags:
+      - "v*"                       # e.g., v1.0.0
   workflow_dispatch:
     inputs:
       version:
-        description: "Semver version (e.g., 1.0.0)"
-        required: true
-  push:
-    tags:
-      - "v*"
+        description: "Semver (e.g., 1.0.0). We'll prepend 'v' if missing."
+        required: false
 
 permissions:
   contents: write
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: [windows-latest]   # add macos-latest if you want a mac build too
-    runs-on: ${{ matrix.os }}
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # if tests need it
-
+    runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      artifact_name: ${{ steps.meta.outputs.artifact_name }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}" -like "refs/tags/*") {
+            $tag = "${{ github.ref_name }}"
+          } elseif ("${{ inputs.version }}") {
+            $v = "${{ inputs.version }}"
+            if ($v.StartsWith("v")) { $tag = $v } else { $tag = "v$($v)" }
+          } else {
+            $tag = "build-${{ github.sha }}".Substring(0, 13)
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "artifact_name=RSG-Recovery-Tools-$tag-Windows.zip" >> $env:GITHUB_OUTPUT
+          Write-Host "Tag: $tag"
+          Write-Host "Artifact: RSG-Recovery-Tools-$tag-Windows.zip"
 
       - uses: actions/setup-python@v5
         with:
@@ -31,12 +45,11 @@ jobs:
           cache: "pip"
 
       - name: Install deps
+        shell: pwsh
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Install dev deps
-        run: pip install -r requirements-dev.txt
+          pip install pyinstaller python-dotenv pytest
 
       - name: Run tests
         run: python -m pytest -q
@@ -48,48 +61,48 @@ jobs:
             --distpath dist `
             --workpath build\pyi_build
 
-      - name: Show dist tree (debug)
+      - name: Show dist contents (debug)
         shell: pwsh
         run: |
-          if (Test-Path dist) { Get-ChildItem -Recurse dist | Format-Table -AutoSize } else { Write-Host "dist not found" }
+          if (Test-Path dist) { Get-ChildItem -Recurse dist | Format-Table -AutoSize } else { throw "dist not found" }
 
-      # - name: Find PyInstaller output folder
-      #   id: find_dist
-      #   shell: pwsh
-      #   run: |
-      #     $dir = Get-ChildItem dist -Directory | Select-Object -First 1 -ExpandProperty Name
-      #     if (-not $dir) { throw "No directories found under dist/" }
-      #     "dist_name=$dir" >> $env:GITHUB_OUTPUT
-      #     Write-Host "Detected dist folder: $dir"
+      - name: Find PyInstaller output folder
+        id: find_dist
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem dist -Directory | Select-Object -First 1 -ExpandProperty Name
+          if (-not $dir) { throw "No directories found under dist/" }
+          "dist_name=$dir" >> $env:GITHUB_OUTPUT
+          Write-Host "Detected dist folder: $dir"
 
-      # - name: Zip artifact
-      #   shell: pwsh
-      #   run: |
-      #     $ZipName = "RSG-Recovery-Tools-${{ github.ref_name }}-Windows.zip"
-      #     $Source  = "dist/${{ steps.find_dist.outputs.dist_name }}/*"
-      #     Compress-Archive -Path $Source -DestinationPath "dist/$ZipName" -Force
       - name: Zip artifact
         shell: pwsh
         run: |
-          $ZipName = "RSG-Recovery-Tools-${{ github.ref_name }}-Windows.zip"
-          $Source  = "dist/RSG-Recovery-Tools.exe"
+          $ZipName = "${{ steps.meta.outputs.artifact_name }}"
+          $Source  = "dist/${{ steps.find_dist.outputs.dist_name }}/*"
           Compress-Archive -Path $Source -DestinationPath "dist/$ZipName" -Force
+
+      - name: Upload build artifact (CI record)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: dist/${{ steps.meta.outputs.artifact_name }}
+
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download artifact from build
+        uses: actions/download-artifact@v4
         with:
-          name: RSG-Recovery-Tools-${{ github.ref_name }}-Windows
+          name: ${{ needs.build.outputs.artifact_name }}
           path: ./release_assets
-        # If you add macOS, download that artifact too with another step
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: RSG Recovery Tools ${{ github.ref_name }}
-          draft: false
-          prerelease: false
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: RSG Recovery Tools ${{ needs.build.outputs.tag }}
+          generate_release_notes: true
           files: |
-            release_assets/*.zip
+            release_assets/${{ needs.build.outputs.artifact_name }}
