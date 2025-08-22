@@ -3,11 +3,11 @@ name: release
 on:
   push:
     tags:
-      - "v*"                       # e.g., v1.0.0
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Semver (e.g., 1.0.0). We'll prepend 'v' if missing."
+        description: "Semver (e.g., 1.0.0). Will prepend 'v' if missing."
         required: false
 
 permissions:
@@ -22,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # SINGLE meta step; defines both job outputs
       - name: Set release metadata
         id: meta
         shell: pwsh
@@ -66,21 +67,21 @@ jobs:
         run: |
           if (Test-Path dist) { Get-ChildItem -Recurse dist | Format-Table -AutoSize } else { throw "dist not found" }
 
-      - name: Find PyInstaller output folder
-        id: find_dist
-        shell: pwsh
-        run: |
-          $dir = Get-ChildItem dist -Directory | Select-Object -First 1 -ExpandProperty Name
-          if (-not $dir) { throw "No directories found under dist/" }
-          "dist_name=$dir" >> $env:GITHUB_OUTPUT
-          Write-Host "Detected dist folder: $dir"
-
-      - name: Zip artifact
+      # Zips either a folder (onedir) or a single .exe (onefile)
+      - name: Zip artifact (folder or single exe)
         shell: pwsh
         run: |
           $ZipName = "${{ steps.meta.outputs.artifact_name }}"
-          $Source  = "dist/${{ steps.find_dist.outputs.dist_name }}/*"
-          Compress-Archive -Path $Source -DestinationPath "dist/$ZipName" -Force
+          $dir = Get-ChildItem dist -Directory | Select-Object -First 1
+          if ($dir) {
+            Write-Host "Found onedir build: $($dir.Name)"
+            Compress-Archive -Path ("dist/{0}/*" -f $dir.Name) -DestinationPath ("dist/{0}" -f $ZipName) -Force
+          } else {
+            $exe = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
+            if (-not $exe) { throw "No .exe or app folder found under dist/" }
+            Write-Host "Found onefile build: $($exe.Name)"
+            Compress-Archive -Path $exe.FullName -DestinationPath ("dist/{0}" -f $ZipName) -Force
+          }
 
       - name: Upload build artifact (CI record)
         uses: actions/upload-artifact@v4
