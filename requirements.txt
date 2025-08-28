@@ -44,3 +44,5 @@ tkinterdnd2
 
 # === Fuzzy logic matching for identifying merchant processors ===
 thefuzz
+## === pyqt version ===
+PyQt6==6.9.1

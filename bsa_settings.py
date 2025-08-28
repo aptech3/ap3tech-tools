@@ -80,7 +80,11 @@ def get_merchant_by_id(row_id):
     conn.close()
     if row:
         keys = ["id", "root", "name", "co", "address", "city", "state", "zip", "notes"]
-        return dict(zip(keys, row, strict=False))
+        # return dict(zip(keys, row, strict=False))
+        # Python 3.8/3.9 friendly: no 'strict' kwarg on zip.
+        # Build dict safely even if row is shorter/longer than keys.
+        data= {k: (row[i] if i < len(row) else None) for i, k in enumerate(keys)}
+        return data
     else:
         return None
 
