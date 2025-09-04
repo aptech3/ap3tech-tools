@@ -42,15 +42,7 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         shell: bash
         run: |
-          pyinstaller \
-            --noconfirm --clean --windowed --onefile \
-            --name "RSG-Recovery-Tools" \
-            # Rely on PyInstaller's PyQt6 hooks; avoid collect-all to prevent duplicate Qt frameworks
-            --exclude-module PyQt6.QtBluetooth \
-            --exclude-module PyQt6.QtNfc \
-            --add-data "logo.png;." \
-            --add-data "merchant_db.sqlite;." \
-            main_app_pyqt.py
+          pyinstaller --noconfirm --clean --windowed --onefile --name "RSG-Recovery-Tools" --exclude-module PyQt6.QtBluetooth --exclude-module PyQt6.QtNfc --add-data "logo.png;." --add-data "merchant_db.sqlite;." main_app_pyqt.py
           ls -la dist
 
       - name: Build (macOS)
