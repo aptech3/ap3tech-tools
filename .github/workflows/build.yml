@@ -8,6 +8,14 @@ on:
 
 jobs:
   build:
+    env:
+      # Expose secrets as env so we can reference them in step `if:` conditions
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
+      NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
+      NOTARIZE_PASSWORD: ${{ secrets.NOTARIZE_PASSWORD }}
     strategy:
       fail-fast: false
       matrix:
@@ -66,12 +74,8 @@ jobs:
           fi
 
       - name: Code sign .app (optional)
-        if: startsWith(matrix.os, 'macos') && secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.MACOS_SIGNING_IDENTITY != ''
+        if: startsWith(matrix.os, 'macos') && env.MACOS_CERT_P12_BASE64 != '' && env.MACOS_CERT_PASSWORD != '' && env.MACOS_SIGNING_IDENTITY != ''
         shell: bash
-        env:
-          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           KEYCHAIN=build.keychain
@@ -103,12 +107,8 @@ jobs:
           fi
 
       - name: Notarize DMG (optional)
-        if: startsWith(matrix.os, 'macos') && secrets.NOTARIZE_APPLE_ID != '' && secrets.NOTARIZE_TEAM_ID != '' && secrets.NOTARIZE_PASSWORD != ''
+        if: startsWith(matrix.os, 'macos') && env.NOTARIZE_APPLE_ID != '' && env.NOTARIZE_TEAM_ID != '' && env.NOTARIZE_PASSWORD != ''
         shell: bash
-        env:
-          NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
-          NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
-          NOTARIZE_PASSWORD: ${{ secrets.NOTARIZE_PASSWORD }}
         run: |
           set -euo pipefail
           DMG_PATH="dist/RSG-Recovery-Tools-macos.dmg"
