@@ -46,3 +46,4 @@ tkinterdnd2
 thefuzz
 ## === pyqt version ===
 PyQt6==6.9.1
+httpx==0.27.2

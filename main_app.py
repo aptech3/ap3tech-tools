@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 
 import customtkinter as ctk
 from customtkinter import CTkImage
@@ -24,8 +24,31 @@ app.resizable(False, False)
 # --- Modal Popup Tracker ---
 current_popup = {"window": None}
 
+
+def write_env_key(name: str, value: str):
+    """Upsert NAME=value into a .env file in the project directory (same dir as this script)."""
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.path.join(root_dir, ".env")
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    written = False
+    new_lines = []
+    for line in lines:
+        if line.strip().startswith(f"{name}="):
+            new_lines.append(f'{name}="{value}"')
+            written = True
+        else:
+            new_lines.append(line)
+    if not written:
+        new_lines.append(f'{name}="{value}"')
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(new_lines) + "\n")
+
 # --- Sidebar (Left) ---
-sidebar = ctk.CTkFrame(app, width=220, fg_color="#f2f6fa", corner_radius=0)
+# Widen sidebar so longer button labels fit
+sidebar = ctk.CTkFrame(app, width=300, fg_color="#f2f6fa", corner_radius=0)
 sidebar.pack(side="left", fill="y")
 
 # --- Main Content Area (Right) ---
@@ -93,7 +116,7 @@ def set_sidebar(mode):
                 font=("Arial", 14, "bold"),
                 corner_radius=20,
                 height=38,
-                width=170,
+                width=260,
             ).pack(pady=6, padx=18, anchor="nw")
 
 
@@ -386,17 +409,40 @@ def set_content(mode):
                 pass
 
             openai_api_key = os.getenv("OPENAI_API_KEY", "")
+            if not openai_api_key:
+                try:
+                    import config  # optional, ignored by git
+                    openai_api_key = getattr(config, "openai_api_key", "")
+                except Exception:
+                    openai_api_key = ""
 
             if not openai_api_key:
-                # Stop the animation and inform the user clearly
-                thinking_event.set()
-                messagebox.showerror(
-                    "Missing API Key",
-                    "OPENAI_API_KEY is not set.\n\n"
-                    "Set it in your environment (or .env for local dev), "
-                    "or configure it as a GitHub Secret for CI/CD.",
+                # Prompt for key and save to .env
+                key = simpledialog.askstring(
+                    "OpenAI API Key",
+                    "Paste your OpenAI API key:\n(It will be saved to a local .env file)",
+                    parent=app,
+                    show='*'
                 )
-                return
+                if key:
+                    try:
+                        write_env_key("OPENAI_API_KEY", key)
+                        os.environ["OPENAI_API_KEY"] = key
+                        openai_api_key = key
+                    except Exception as e:
+                        thinking_event.set()
+                        messagebox.showerror("Save Error", str(e))
+                        return
+                else:
+                    # Stop the animation and inform the user clearly
+                    thinking_event.set()
+                    messagebox.showerror(
+                        "Missing API Key",
+                        "OPENAI_API_KEY is not set.\n\n"
+                        "Set it in your environment (or .env for local dev),\n"
+                        "or create config.py with openai_api_key='...'.",
+                    )
+                    return
 
             try:
                 import ai_analysis
@@ -445,6 +491,34 @@ def set_content(mode):
             corner_radius=22,
             width=180,
         ).pack(pady=18)
+
+        # Dedicated button to set/save OpenAI API key
+        def set_openai_key():
+            key = simpledialog.askstring(
+                "OpenAI API Key",
+                "Paste your OpenAI API key:\n(It will be saved to a local .env file)",
+                parent=app,
+                show='*'
+            )
+            if key:
+                try:
+                    write_env_key("OPENAI_API_KEY", key)
+                    os.environ["OPENAI_API_KEY"] = key
+                    messagebox.showinfo("Saved", ".env updated with OPENAI_API_KEY")
+                except Exception as e:
+                    messagebox.showerror("Save Error", str(e))
+
+        ctk.CTkButton(
+            content,
+            text="Set/OpenAI Key",
+            command=set_openai_key,
+            fg_color="#ba0075",
+            hover_color="#7e0059",
+            text_color="white",
+            font=("Arial", 13, "bold"),
+            corner_radius=22,
+            width=180,
+        ).pack(pady=(0, 18))
 
     elif mode == "bsa_settings":
         ctk.CTkLabel(
@@ -1042,24 +1116,57 @@ def set_content(mode):
         def run_evg_splitter(filepaths):
             try:
                 import evg_splitter
+                # Redaction helper (optional)
+                try:
+                    import contract_redactor
+                except Exception:
+                    contract_redactor = None
 
                 output_root = os.path.join(
                     os.path.expanduser("~"), "Desktop", "RSG Recovery Tools data output"
                 )
                 os.makedirs(output_root, exist_ok=True)
                 for file in filepaths:
-                    evg_splitter.split_recovery_pdf(file, output_dir=output_root)
+                    save_dir = evg_splitter.split_recovery_pdf(file, output_dir=output_root)
+                    # If Mulligan Funding contract detected, auto-redact page 5 sensitive fields
+                    if contract_redactor and isinstance(save_dir, str) and os.path.isdir(save_dir):
+                        try:
+                            for fname in os.listdir(save_dir):
+                                if fname.lower().endswith(" contract.pdf"):
+                                    cpath = os.path.join(save_dir, fname)
+                                    # Redact only if it's a Mulligan Funding contract
+                                    try:
+                                        contract_redactor.redact_if_mulligan(cpath, page_number=5)
+                                    except Exception:
+                                        # continue processing others; errors surface via general flow
+                                        pass
+                        except Exception:
+                            pass
             finally:
                 thinking_event.set()
 
         def on_drop(event):
             filepaths = app.tk.splitlist(event.data)
-            selected_label.configure(text="")
+            filepaths = [p for p in filepaths if str(p).lower().endswith('.pdf')]
+            if not filepaths:
+                messagebox.showwarning("Invalid Drop", "Please drop one or more PDF files.")
+                return
+            selected_label.configure(text=f"{len(filepaths)} file(s) queued…")
             thinking_event.clear()
             threading.Thread(target=animate_jumping_letters, daemon=True).start()
             threading.Thread(
                 target=run_evg_splitter, args=(filepaths,), daemon=True
             ).start()
+            def notify_when_done():
+                if thinking_event.is_set():
+                    try:
+                        output_root = os.path.join(os.path.expanduser("~"), "Desktop", "RSG Recovery Tools data output")
+                        messagebox.showinfo("EVG Split Complete", f"Split files saved under:\n{output_root}")
+                    except Exception:
+                        pass
+                else:
+                    content.after(250, notify_when_done)
+            content.after(250, notify_when_done)
 
         drop_frame.drop_target_register(DND_FILES)
         drop_frame.dnd_bind("<<Drop>>", on_drop)
@@ -1069,12 +1176,26 @@ def set_content(mode):
                 title="Select EVG Recovery PDF(s)", filetypes=[("PDF files", "*.pdf")]
             )
             if filepaths:
-                selected_label.configure(text="")
+                filepaths = [p for p in filepaths if str(p).lower().endswith('.pdf')]
+                if not filepaths:
+                    messagebox.showwarning("Browse Files", "No PDF files selected.")
+                    return
+                selected_label.configure(text=f"{len(filepaths)} file(s) queued…")
                 thinking_event.clear()
                 threading.Thread(target=animate_jumping_letters, daemon=True).start()
                 threading.Thread(
                     target=run_evg_splitter, args=(filepaths,), daemon=True
                 ).start()
+                def notify_when_done():
+                    if thinking_event.is_set():
+                        try:
+                            output_root = os.path.join(os.path.expanduser("~"), "Desktop", "RSG Recovery Tools data output")
+                            messagebox.showinfo("EVG Split Complete", f"Split files saved under:\n{output_root}")
+                        except Exception:
+                            pass
+                    else:
+                        content.after(250, notify_when_done)
+                content.after(250, notify_when_done)
 
         ctk.CTkButton(
             content,

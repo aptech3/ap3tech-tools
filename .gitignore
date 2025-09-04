@@ -1,7 +1,10 @@
 # .gitignore
 config.py
+conig.py
+.env
 .venv/
 venv/
 env/
 **/__pycache__/
 *.pyc
+pdf/

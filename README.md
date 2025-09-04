@@ -1,23 +1,26 @@
 # RSG Recovery Tools
 
-**RSG Recovery Tools** is a collection of utilities for processing and analyzing bank statements and related documents.
-It uses [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (via `pytesseract`) and PDF parsing libraries (`PyPDF2`, `fitz`, etc.) to extract, summarize, and clean data for downstream use.
+**RSG Recovery Tools** is a PyQt desktop application and toolkit for processing and analyzing bank statements and related documents. It combines robust PDF parsing with optional OCR and an AI‑powered statement analysis workflow (OpenAI).
 
 ---
 
 ## Features
-- Extract text from PDFs (including scanned documents) using OCR
-- Summarize and normalize bank statements
-- Tools for compressing and cleaning large PDFs
-- Extensible: add custom rules for your agency or client workflows
-- Cross-platform (Linux, macOS, Windows)
+- AI Statement Analysis: GPT‑based extraction and summary, outputs a concise PDF and now previews the summary inside the app (zoom + page navigation).
+- Bank Statement Analyzer: detect processors, totals, and linked accounts with optional OCR and diagnostics.
+- EVG Recovery Splitter: split EVG Recovery PDFs; auto‑redact Mulligan contracts when detected.
+- BSA Settings: manage merchant processor and exclusion lists.
+- PDF utilities: redaction helpers, compression, and extraction utilities.
+- Cross‑platform: Windows 11 and macOS supported. Linux works from source.
 
 ---
 
 ## Requirements
-- **Python** 3.9+
-- **Tesseract OCR** (must be installed separately, see below)
-- (Optional) **Poppler** if using advanced PDF features
+- For packaged builds (recommended for agents): none — just run the downloaded binary.
+- For running from source:
+  - **Python** 3.11 recommended (wheels available for PyMuPDF)
+  - **Tesseract OCR** (optional; used for OCR when needed)
+  - **Poppler** (optional; used by `pdf2image` fallback in previews)
+  - **OpenAI API key** for AI analysis (`OPENAI_API_KEY`)
 
 ### Install Tesseract
 - **Windows**:
@@ -37,20 +40,21 @@ It uses [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (via `pytess
 
 ## Installation
 
-Clone the repo and install Python dependencies:
+### Windows 11 (agents)
+- Download `RSG-Recovery-Tools.exe` from GitHub Actions artifacts (workflow: `Build Desktop Apps`) or from Releases if published.
+- Double‑click to run. No installer or Python required.
 
+### macOS (agents)
+- Download the `RSG-Recovery-Tools` app binary from GitHub Actions artifacts.
+- First launch: right‑click → Open (Gatekeeper). For a smoother UX, code signing/notarization can be added.
+
+### From source (devs)
 ```bash
 git clone https://github.com/AmberRSG/rsg-recovery-tools.git
 cd rsg-recovery-tools
-pip install -r requirements.txt
-```
-
-(Optional) If using a virtual environment:
-
-```bash
 python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-.venv\Scripts\activate     # Windows
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate   # Windows
 pip install -r requirements.txt
 ```
 
@@ -59,13 +63,11 @@ pip install -r requirements.txt
 ## Usage
 
 ### Running the App
-If your main entry point is `main_app.py`:
-
+Run the PyQt app:
 ```bash
-python main_app.py
+python main_app_pyqt.py
 ```
-
-The app will launch a Tkinter-based GUI where you can load and process bank statement PDFs.
+The app launches with pages for Bank Analyzer, AI Statement Analysis, EVG Splitter, and BSA Settings.
 
 ### Command-line Utilities
 Some scripts can be run directly, for example:
@@ -111,12 +113,10 @@ Pull requests should target `pre-prod`. Once validated, code is merged into `mai
 
 ## CI/CD
 
-GitHub Actions run tests on pushes to `pre-prod` and `main`.
-
-Example pipeline includes:
-- Installing Tesseract on CI runners
-- Running unit tests
-- Packaging for release (future work)
+- GitHub Actions build workflow: `.github/workflows/build.yml`
+  - Builds single‑file artifacts for Windows (`.exe`) and macOS (binary) using PyInstaller.
+  - Uploads build artifacts for download.
+  - Uses `requirements-build.txt` for a stable build environment.
 
 ---
 
@@ -149,3 +149,4 @@ See the [LICENSE](LICENSE) file for details.
 - Do **not** commit `tesseract/`, `poppler/`, or other binary blobs to source control.
 - Instead, list dependencies in `requirements.txt` and rely on package managers (`apt`, `brew`, `choco`) for installing binaries.
 - If you need trained OCR models (`.traineddata`), commit them via [Git LFS](https://git-lfs.com/).
+ - For AI analysis, set `OPENAI_API_KEY` in your environment or via the app’s “Set/OpenAI Key” dialog.

@@ -1,0 +1,74 @@
+name: Build Desktop Apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-version: ['3.11']
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies (build subset)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+          pip install pyinstaller==6.5.0
+
+      - name: Build (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: bash
+        run: |
+          pyinstaller \
+            --noconfirm --clean --windowed --onefile \
+            --name "RSG-Recovery-Tools" \
+            --collect-all PyQt6 \
+            --add-data "logo.png;." \
+            --add-data "merchant_db.sqlite;." \
+            main_app_pyqt.py
+          ls -la dist
+
+      - name: Build (macOS)
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        run: |
+          pyinstaller \
+            --noconfirm --clean --windowed --onefile \
+            --name "RSG-Recovery-Tools" \
+            --collect-all PyQt6 \
+            --add-data "logo.png:." \
+            --add-data "merchant_db.sqlite:." \
+            main_app_pyqt.py
+          ls -la dist
+
+      - name: Upload artifact (Windows)
+        if: startsWith(matrix.os, 'windows')
+        uses: actions/upload-artifact@v4
+        with:
+          name: RSG-Recovery-Tools-windows
+          path: dist/RSG-Recovery-Tools.exe
+          if-no-files-found: error
+
+      - name: Upload artifact (macOS)
+        if: startsWith(matrix.os, 'macos')
+        uses: actions/upload-artifact@v4
+        with:
+          name: RSG-Recovery-Tools-macos
+          path: dist/RSG-Recovery-Tools
+          if-no-files-found: error
+

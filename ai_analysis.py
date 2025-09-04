@@ -111,29 +111,113 @@ def _chat_completion(
     max_tokens: int = 512,
     temperature: float = 0.1,
 ):
-    """Version-tolerant wrapper around OpenAI Chat Completions API (no ignores)."""
-    # Newer SDK (client) path
-    if hasattr(openai, "OpenAI"):
-        client = openai.OpenAI(api_key=api_key)
-        return client.chat.completions.create(
+    """Version-tolerant wrapper around OpenAI Chat Completions API using 1.x-first semantics.
+
+    Order of preference:
+    1) 1.x module-level: openai.chat.completions.create
+    2) 1.x client object: openai.OpenAI(...).chat.completions.create
+    3) 0.x legacy: openai.ChatCompletion.create (only if 1.x interfaces are missing)
+    """
+    # Set module-level key so module-level client can use it
+    try:
+        openai.api_key = api_key
+    except Exception:
+        pass
+
+    # Allow forcing legacy off if needed
+    force_legacy = os.getenv("OPENAI_FORCE_LEGACY") == "1"
+
+    # Optional override: force raw HTTP (bypass SDK entirely)
+    force_http = os.getenv("OPENAI_FORCE_HTTP") == "1"
+
+    if force_http:
+        http_resp = _http_chat_completion(api_key, model, messages, max_tokens, temperature)
+        if http_resp is not None:
+            return http_resp
+
+    # Prefer new 1.x module-level helper if available and not forcing legacy
+    if not force_legacy:
+        chat_obj = getattr(openai, "chat", None)
+        comps = getattr(chat_obj, "completions", None) if chat_obj else None
+        create_fn = getattr(comps, "create", None) if comps else None
+        if callable(create_fn):
+            try:
+                return create_fn(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=90.0,
+                )
+            except TypeError as e:
+                # Some environments inject unsupported kwargs into calls; try client path next
+                if "proxies" not in str(e) and "unexpected keyword" not in str(e):
+                    raise
+
+        # Try explicit client next
+        if hasattr(openai, "OpenAI"):
+            try:
+                # Add a sane timeout to avoid hanging indefinitely
+                client = openai.OpenAI(api_key=api_key, timeout=90.0)
+                return client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            except TypeError as e:
+                if "proxies" not in str(e) and "unexpected keyword" not in str(e):
+                    raise
+
+    # Legacy 0.x path only if present (avoid in 1.x where it raises migration error)
+    legacy_cls = getattr(openai, "ChatCompletion", None)
+    if legacy_cls is not None and callable(getattr(legacy_cls, "create", None)):
+        # Guard against 1.x with shim that errors out: if 1.x is present, this call will raise.
+        return legacy_cls.create(
             model=model,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
         )
-    # Legacy SDK path via getattr to avoid attribute-check errors in mypy
-    openai.api_key = api_key
-    chat_cls = getattr(openai, "ChatCompletion", None)
-    if chat_cls is not None and hasattr(chat_cls, "create"):
-        return chat_cls.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-    raise RuntimeError(
-        "OpenAI Chat Completions unavailable: SDK missing both client and legacy API"
-    )
+
+    # Final fallback: attempt raw HTTP once even if not forced
+    http_resp = _http_chat_completion(api_key, model, messages, max_tokens, temperature)
+    if http_resp is not None:
+        return http_resp
+
+    raise RuntimeError("OpenAI Chat Completions unavailable with current SDK configuration")
+
+
+def _http_chat_completion(api_key: str, model: str, messages: Any, max_tokens: int, temperature: float):
+    """Minimal HTTP fallback for chat.completions that respects env proxies.
+
+    Uses urllib with default ProxyHandler so HTTPS_PROXY/HTTP_PROXY are honored.
+    Returns parsed dict on success, or None if any transport error occurs.
+    """
+    try:
+        import json
+        from urllib import request, error
+
+        api_base = os.getenv("OPENAI_API_BASE") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        url = api_base.rstrip("/") + "/chat/completions"
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", f"Bearer {api_key}")
+
+        opener = request.build_opener(request.ProxyHandler())  # uses env proxies
+        with opener.open(req, timeout=90) as resp:
+            body = resp.read().decode("utf-8")
+            return json.loads(body)
+    except Exception:
+        return None
 
 
 # --- Parsing & tally logic (code does the math; GPT only extracts entities) ----
@@ -239,7 +323,8 @@ def sum_deposits_and_accounts(
 
 
 # --- GPT: only for entity extraction & narrative summaries ---------------------
-_DEF_MODEL = "gpt-4-turbo"  # change to "gpt-4o-mini" if preferred
+# Default to a broadly available, fast model
+_DEF_MODEL = "gpt-4o-mini"
 
 
 def gpt_extract_entities(

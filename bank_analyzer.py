@@ -11,6 +11,27 @@ from pdf2image import convert_from_path
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from thefuzz import fuzz
+from typing import Callable, Optional
+
+# Heuristic header matcher: exact token first, fuzzy only for short lines
+def _matches_header_text(s: str, phrases: list) -> bool:
+    s_low = s.strip().lower()
+    def _has_token(p: str) -> bool:
+        p = p.lower()
+        # For short tokens like 'atm', 'pos', require whole-word match to avoid false positives
+        if len(p) <= 3 and all(ch.isalpha() for ch in p):
+            return re.search(r"\b" + re.escape(p) + r"s?\b", s_low) is not None
+        return p in s_low
+    if any(_has_token(p) for p in phrases):
+        return True
+    if len(s_low) <= 40:  # avoid fuzzy on long sentences (e.g., banner notices)
+        for p in phrases:
+            try:
+                if fuzz.ratio(s_low, p) >= 90:
+                    return True
+            except Exception:
+                continue
+    return False
 
 import bsa_settings  # Your DB logic!
 
@@ -152,19 +173,56 @@ def find_processor_pages(pdf_path, merchant_keywords, debtor_name):
         "ads",
         "transfer",
     ]
+    deposit_keywords = [
+        "deposit", "credit", "payment from", "received from", "income", "ach credit"
+    ]
+    withdrawal_keywords = [
+        "withdrawal", "payment to", "purchase", "debit", "withdraw", "sent to", "pos", "atm", "ach debit", "fee"
+    ]
+    depos_headers = [
+        "deposits", "deposit ", "credits", "deposits and credits", "deposit and other credits",
+        "deposits & other credits", "credits posted", "electronic credits",
+        "incoming transfer", "direct deposit", "mobile deposit", "check deposit", "cash deposit",
+        "other credits", "total deposits", "ach credits"
+    ]
+    withdr_headers = [
+        "withdrawals", "debits", "withdrawals and debits", "debits and other withdrawals",
+        "ach debit", "card purchases", "fees", "checks"
+    ]
+
+    def _is_deposit_line(line_lower: str, current_section: Optional[str]) -> bool:
+        if current_section == 'dep':
+            return True
+        # Fallback heuristic if no section detected
+        has_dep = any(w in line_lower for w in deposit_keywords)
+        has_wd = any(w in line_lower for w in withdrawal_keywords)
+        if has_dep and not has_wd:
+            return True
+        # final fallback: positive amount and no withdrawal keywords
+        has_pos_amount = any(
+            not a.replace(',', '').strip().startswith('-')
+            for a in re.findall(r"\$?(-?[\d,]+\.\d\d)", line_lower)
+        )
+        return has_pos_amount and not has_wd
+
     try:
         reader = PyPDF2.PdfReader(pdf_path)
         for i, page in enumerate(reader.pages):
             text = page.extract_text() or ""
+            current_section = None
             for line in text.splitlines():
                 line_lower = line.lower()
-
-                # Only look at deposit/credit lines (no negatives, no "withdrawal" words)
-                amounts = re.findall(r"\$?(-?[\d,]+\.\d\d)", line)
-                is_deposit = any(
-                    not amt.replace(",", "").strip().startswith("-") for amt in amounts
-                )
-                if not is_deposit:
+                if any(h in line_lower for h in depos_headers) or any(
+                    fuzz.ratio(line_lower, h) >= 85 for h in depos_headers
+                ):
+                    current_section = 'dep'
+                    continue
+                if any(h in line_lower for h in withdr_headers) or any(
+                    fuzz.ratio(line_lower, h) >= 85 for h in withdr_headers
+                ):
+                    current_section = 'wd'
+                    continue
+                if not _is_deposit_line(line_lower, current_section):
                     continue
 
                 # KNOWN merchant processors
@@ -216,19 +274,50 @@ def find_processor_pages_with_exclusion(
         "ads",
         "transfer",
     ]
+    deposit_keywords = [
+        "deposit", "credit", "payment from", "received from", "income", "ach credit"
+    ]
+    withdrawal_keywords = [
+        "withdrawal", "payment to", "purchase", "debit", "withdraw", "sent to", "pos", "atm", "ach debit", "fee"
+    ]
+    depos_headers = [
+        "deposits", "deposit ", "credits", "deposits and credits", "deposit and other credits",
+        "deposits & other credits", "credits posted", "electronic credits",
+        "incoming transfer", "direct deposit", "mobile deposit", "check deposit", "cash deposit",
+        "other credits", "total deposits", "ach credits"
+    ]
+    withdr_headers = [
+        "withdrawals", "debits", "withdrawals and debits", "debits and other withdrawals",
+        "ach debit", "card purchases", "fees", "checks"
+    ]
+
+    def _is_deposit_line(line_lower: str, current_section: Optional[str]) -> bool:
+        if current_section == 'dep':
+            return True
+        has_dep = any(w in line_lower for w in deposit_keywords)
+        has_wd = any(w in line_lower for w in withdrawal_keywords)
+        if has_dep and not has_wd:
+            return True
+        has_pos_amount = any(
+            not a.replace(',', '').strip().startswith('-')
+            for a in re.findall(r"\$?(-?[\d,]+\.\d\d)", line_lower)
+        )
+        return has_pos_amount and not has_wd
+
     try:
         reader = PyPDF2.PdfReader(pdf_path)
         for i, page in enumerate(reader.pages):
             text = page.extract_text() or ""
+            current_section = None
             for line in text.splitlines():
                 line_lower = line.lower()
-
-                # Only look at deposit/credit lines (no negatives, no "withdrawal" words)
-                amounts = re.findall(r"\$?(-?[\d,]+\.\d\d)", line)
-                is_deposit = any(
-                    not amt.replace(",", "").strip().startswith("-") for amt in amounts
-                )
-                if not is_deposit:
+                if _matches_header_text(line_lower, depos_headers):
+                    current_section = 'dep'
+                    continue
+                if _matches_header_text(line_lower, withdr_headers):
+                    current_section = 'wd'
+                    continue
+                if not _is_deposit_line(line_lower, current_section):
                     continue
 
                 # KNOWN merchant processors
@@ -317,22 +406,55 @@ def save_processor_pages(pdf_path, processor_matches, subfolder):
 
 
 def extract_text_from_pdf(pdf_path):
+    """
+    Extract text from a PDF. Honors env var BANK_OCR_FIRST=1 to run OCR first.
+    Fallback order:
+      - If BANK_OCR_FIRST=1: OCR, then pdf text
+      - Else: pdf text, then OCR
+    """
     import pdfplumber
     import pytesseract
 
-    with pdfplumber.open(pdf_path) as pdf:
-        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-    if text.strip():
-        return text
-    poppler_path = get_poppler_path()
-    images = convert_from_path(pdf_path, poppler_path=poppler_path)
-    ocr_text = ""
-    for img in images:
-        ocr_text += pytesseract.image_to_string(img) + "\n"
-    return ocr_text
+    def _ocr_all_pages() -> str:
+        poppler_path = get_poppler_path()
+        images = convert_from_path(pdf_path, poppler_path=poppler_path)
+        ocr_text_local = ""
+        for img in images:
+            try:
+                ocr_cfg = os.getenv("BANK_OCR_CONFIG", "--psm 6")
+                ocr_text_local += pytesseract.image_to_string(img, config=ocr_cfg) + "\n"
+            except Exception:
+                ocr_text_local += pytesseract.image_to_string(img) + "\n"
+        return ocr_text_local
+
+    def _pdf_text() -> str:
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                return "\n".join(page.extract_text() or "" for page in pdf.pages)
+        except Exception:
+            return ""
+
+    ocr_first = os.getenv("BANK_OCR_FIRST") == "1"
+    if ocr_first:
+        try:
+            text = _ocr_all_pages()
+            if text.strip():
+                return text
+        except Exception:
+            pass
+        text2 = _pdf_text()
+        return text2
+    else:
+        text = _pdf_text()
+        if text.strip():
+            return text
+        try:
+            return _ocr_all_pages()
+        except Exception:
+            return text
 
 
-def process_bank_statements_full(filepaths, content_frame=None):
+def process_bank_statements_full(filepaths, content_frame=None, progress_cb: Optional[Callable[[str], None]] = None):
     # Get merchant processors (known) and exclusions
     merchant_keywords = bsa_settings.get_all_merchants() + [
         "Square",
@@ -352,7 +474,13 @@ def process_bank_statements_full(filepaths, content_frame=None):
                 return True
         return False
 
-    for pdf_path in filepaths:
+    total_files = len(filepaths)
+    for idx, pdf_path in enumerate(filepaths, start=1):
+        if progress_cb:
+            try:
+                progress_cb(f"Processing {idx}/{total_files}: {os.path.basename(pdf_path)}")
+            except Exception:
+                pass
         subfolder = get_statement_subfolder(pdf_path)
         debtor_name = extract_company_name(pdf_path)
 
@@ -376,14 +504,41 @@ def process_bank_statements_full(filepaths, content_frame=None):
         save_processor_pages(pdf_path, processor_matches, subfolder)
 
         # --- BASIC SUMMARY SECTION ---
+        if progress_cb:
+            try:
+                progress_cb("Extracting text…")
+            except Exception:
+                pass
         text = extract_text_from_pdf(pdf_path)
+
+        # Debug: detect and save headers seen in OCR/text
+        try:
+            headers_report = detect_section_headers(text)
+            debug_path = subfolder / f"{debtor_name} Headers Debug.txt"
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write("Detected Deposit Headers:\n")
+                for h in headers_report["deposit"][:10]:
+                    f.write(f"- {h}\n")
+                f.write("\nDetected Withdrawal Headers:\n")
+                for h in headers_report["withdrawal"][:10]:
+                    f.write(f"- {h}\n")
+                f.write("\nOther Header-Like Lines:\n")
+                for h in headers_report["other"][:10]:
+                    f.write(f"- {h}\n")
+            if progress_cb:
+                try:
+                    progress_cb("Analyzing deposits and linked accounts…")
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # Merchant processor summary: one line per processor, total and %
         # (Optionally skip exclusions here too, for extra thoroughness)
         filtered_processors = [
             proc for proc in merchant_keywords if not is_excluded(proc)
         ]
-        processor_totals, total_income = summarize_processors(text, filtered_processors)
+        processor_totals, total_income, deposit_debug_lines = summarize_processors(text, filtered_processors)
 
         # Linked accounts: only ones mentioned on transfer/ACH-type lines
         linked_accounts = summarize_linked_accounts(text)
@@ -400,6 +555,69 @@ def process_bank_statements_full(filepaths, content_frame=None):
             linked_accounts,
             possible_mcas,
         )
+        # Write deposit lines debug for diagnostics
+        try:
+            dep_dbg = subfolder / f"{debtor_name} Deposit Lines Debug.txt"
+            with open(dep_dbg, "w", encoding="utf-8") as f:
+                for ln in deposit_debug_lines[:300]:
+                    f.write(ln + "\n")
+        except Exception:
+            pass
+        if progress_cb:
+            try:
+                progress_cb(f"Saved summary: {os.path.basename(summary_pdf)}")
+            except Exception:
+                pass
+
+
+def detect_section_headers(text: str):
+    """Return a dict with detected deposit/withdrawal headers and other header-like lines.
+    Uses exact token matching, and only applies fuzzy matching to short lines to avoid false positives
+    like banner notices.
+    """
+    depos_headers = [
+        "deposits", "deposit ", "deposits/credits", "credits", "credits (+)",
+        "deposits and credits", "deposit and other credits",
+        "deposits & other credits", "credits posted", "electronic credits",
+        "incoming transfer", "direct deposit", "mobile deposit", "check deposit", "cash deposit",
+        "other deposits", "customer deposits", "total customer deposits",
+        "other credits", "total deposits", "ach credits"
+    ]
+    withdr_headers = [
+        "withdrawals", "withdrawal", "withdrawals/debits", "debits", "debits (-)",
+        "withdrawals and debits", "debits and other withdrawals",
+        "debits & other withdrawals", "ach debit", "card purchases", "fees", "checks", "bill pay"
+    ]
+
+    deposits_found = []
+    withdrawals_found = []
+    header_like = []
+
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s:
+            continue
+        low = s.lower()
+        # direct token or short-line fuzzy match
+        if _matches_header_text(low, depos_headers):
+            if s not in deposits_found:
+                deposits_found.append(s)
+            continue
+        if _matches_header_text(low, withdr_headers):
+            if s not in withdrawals_found:
+                withdrawals_found.append(s)
+            continue
+        # header-like heuristic: mostly uppercase words, few digits, reasonable length, contains vowels
+        if 4 <= len(s) <= 64:
+            letters = sum(ch.isalpha() for ch in s)
+            uppers = sum(ch.isupper() for ch in s)
+            digits = sum(ch.isdigit() for ch in s)
+            vowels = sum(ch.lower() in "aeiou" for ch in s)
+            if letters > 0 and uppers / max(1, letters) >= 0.6 and digits / max(1, len(s)) < 0.2 and vowels > 0:
+                if s not in header_like:
+                    header_like.append(s)
+
+    return {"deposit": deposits_found, "withdrawal": withdrawals_found, "other": header_like}
 
 
 def summarize_linked_accounts(text):
@@ -427,26 +645,258 @@ def summarize_linked_accounts(text):
 
 
 def summarize_processors(text, known_processors):
-    processor_totals = {}
-    total_income = 0
+    """
+    Sum deposits per processor only (ignore withdrawals/fees).
+    If the text appears to be a Berkshire Bank statement, use a bank-specific parser
+    tuned for the "Date Description Additions Subtractions Balance" layout.
+    Otherwise, use a generic, section-aware heuristic that is robust to two-column layouts.
+    """
+    # Bank-specific fast-paths
+    if detect_berkshire_bank(text):
+        return _summarize_processors_berkshire(text, known_processors)
+    if detect_us_bank(text):
+        return _summarize_processors_us_bank(text, known_processors)
 
+    # -------------------- Generic heuristic (fallback) --------------------
+    processor_totals = {}
+    total_income = 0.0
+
+    depos_headers = [
+        "deposits", "deposit ", "credits", "deposits and credits", "deposit and other credits",
+        "deposits & other credits", "credits posted", "electronic credits",
+        "incoming transfer", "direct deposit", "mobile deposit", "check deposit", "cash deposit",
+        "other credits", "total deposits", "ach credits"
+    ]
+    withdr_headers = [
+        "withdrawals", "debits", "withdrawals and debits", "debits and other withdrawals",
+        "debits & other withdrawals", "ach debit", "card purchases", "fees", "checks",
+        "other debits", "electronic debits", "bill pay"
+    ]
+    deposit_keywords = [
+        "deposit", "credit", "ach credit", "incoming transfer", "direct deposit", "refund"
+    ]
+    withdrawal_keywords = [
+        "withdrawal", "debit", "ach debit", "purchase", "pos", "atm", "check", "fee", "bill pay"
+    ]
+    balance_markers = ["balance", "subtotal", "total "]
+
+    def _is_header(line: str, keys: list) -> bool:
+        # Use the module-level matcher to avoid false positives on long sentences
+        return _matches_header_text(line, keys)
+
+    current_section = None  # 'dep' | 'wd' | None
     lines = text.splitlines()
     for proc in known_processors:
-        proc_total = 0.0
-        proc_regex = re.compile(rf"{re.escape(proc)}", re.IGNORECASE)
-        for line in lines:
-            if proc_regex.search(line):
-                # Look for *any* $ amount on this line
-                amounts = re.findall(r"\$?([\d,]+\.\d\d)", line)
-                for amt in amounts:
-                    try:
-                        proc_total += float(amt.replace(",", ""))
-                    except ValueError:
-                        continue
-        if proc_total > 0:
-            processor_totals[proc] = round(proc_total, 2)
-            total_income += proc_total
-    return processor_totals, total_income
+        processor_totals[proc] = 0.0
+
+    counted_lines_debug = []
+
+    for raw in lines:
+        line = raw.strip()
+        low = line.lower()
+        if not line:
+            continue
+        if _is_header(line, depos_headers):
+            current_section = 'dep'
+            continue
+        if _is_header(line, withdr_headers):
+            current_section = 'wd'
+            continue
+        if any(b in low for b in balance_markers):
+            # avoid balance/total lines
+            continue
+
+        # Only consider deposit lines: either in deposit section or line-level deposit terms present
+        in_deposit_context = (
+            current_section == 'dep' or (
+                current_section is None and any(k in low for k in deposit_keywords) and not any(k in low for k in withdrawal_keywords)
+            )
+        )
+        if not in_deposit_context:
+            continue
+
+        # Extract amounts; respect parentheses or minus as negative; keep only positives
+        amts_raw = re.findall(r"\$?\s*(\(?-?[\d,]+\.\d\d\)?)", line)
+        if not amts_raw:
+            continue
+        amounts_pos = []
+        for a in amts_raw:
+            s = a.strip()
+            neg = s.startswith('-') or s.endswith(')')
+            try:
+                val = float(s.replace('(', '').replace(')', '').replace(',', '').replace('$', ''))
+            except Exception:
+                continue
+            if not neg and val > 0:
+                amounts_pos.append(val)
+        if not amounts_pos:
+            continue
+        # Prefer the LEFTMOST positive amount (credit column) to avoid picking running balance
+        amount_for_line = None
+        for a in re.finditer(r"\$?\s*(\(?-?[\d,]+\.\d\d\)?)", line):
+            s = a.group(1).strip()
+            neg = s.startswith('-') or s.endswith(')')
+            try:
+                val = float(s.replace('(', '').replace(')', '').replace(',', '').replace('$', ''))
+            except Exception:
+                continue
+            if not neg and val > 0:
+                amount_for_line = val
+                break
+        if amount_for_line is None:
+            amount_for_line = min(amounts_pos) if amounts_pos else None
+        if amount_for_line is None:
+            continue
+
+        matched_any = False
+        for proc in known_processors:
+            if proc.lower() in low:
+                processor_totals[proc] += amount_for_line
+                matched_any = True
+        if matched_any:
+            counted_lines_debug.append(f"{line}  -> +${amount_for_line:,.2f}")
+
+    processor_totals = {k: round(v, 2) for k, v in processor_totals.items() if v > 0}
+    total_income = round(sum(processor_totals.values()), 2)
+    # Return debug lines so callers can write a debug file when needed
+    return processor_totals, total_income, counted_lines_debug
+
+
+def detect_berkshire_bank(text: str) -> bool:
+    t = text.lower()
+    if "berkshire bank" in t or "berkshirebank.com" in t:
+        return True
+    # Header row clue
+    if all(k in t for k in ["date", "description", "additions", "subtractions", "balance"]):
+        return True
+    return False
+
+
+def _summarize_processors_berkshire(text: str, known_processors):
+    """Berkshire Bank layout: rows typically like
+    MM-DD <desc possibly with #ACH Credit / #Deposit / #POS Purchase> <amount> <balance>
+    We take the first positive amount on each row as the deposit/credit and ignore negatives/parentheses.
+    """
+    processor_totals = {p: 0.0 for p in known_processors}
+    counted_lines_debug = []
+
+    date_row = re.compile(r"^\s*\d{2}[-/]\d{2}\b")
+    money_find = re.compile(r"\$?\s*(\(?-?[\d,]+\.\d\d\)?)")
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or not date_row.match(line):
+            continue
+        low = line.lower()
+        # Extract all money fields on the row
+        amts = money_find.findall(line)
+        if not amts:
+            continue
+        # Choose first positive amount (deposit/credit column)
+        amount = None
+        for token in amts:
+            s = token.strip()
+            neg = s.startswith('-') or s.endswith(')')
+            try:
+                val = float(s.replace('(', '').replace(')', '').replace(',', '').replace('$', ''))
+            except Exception:
+                continue
+            if not neg and val > 0:
+                amount = val
+                break
+        if amount is None:
+            continue
+
+        matched = False
+        for proc in known_processors:
+            if proc.lower() in low:
+                processor_totals[proc] += amount
+                matched = True
+        if matched:
+            counted_lines_debug.append(f"{line}  -> +${amount:,.2f}")
+
+    processor_totals = {k: round(v, 2) for k, v in processor_totals.items() if v > 0}
+    total_income = round(sum(processor_totals.values()), 2)
+    return processor_totals, total_income, counted_lines_debug
+
+
+def detect_us_bank(text: str) -> bool:
+    t = text.lower()
+    if "u.s. bank" in t or "us bank" in t or "usbank.com" in t or "usbank" in t:
+        return True
+    # Headers commonly seen
+    if ("deposits/credits" in t and "withdrawals/debits" in t) or ("credits (+)" in t and "debits (-)" in t):
+        return True
+    return False
+
+
+def _summarize_processors_us_bank(text: str, known_processors):
+    """U.S. Bank style rows often include MM/DD and separate credit/debit columns
+    labeled Deposits/Credits and Withdrawals/Debits, or Credits (+)/Debits (-).
+    We treat the first positive money token on each row as the credit and ignore negatives.
+    """
+    processor_totals = {p: 0.0 for p in known_processors}
+    counted_lines_debug = []
+
+    # Date patterns occasionally include year or month name; accept both
+    date_row_num = re.compile(r"^\s*\d{2}[/-]\d{2}(?:[/-]\d{2,4})?\b")
+    date_row_mon = re.compile(r"^\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}\b", re.I)
+    money_find = re.compile(r"\$?\s*(\(?-?[\d,]+\.\d\d\)?)")
+    ignore_section_markers = [
+        "analysis service charge detail",
+        "service activity detail",
+        "balance summary",
+        "account summary",
+        "balances only appear for days reflecting change",
+        "subtotal:",
+        "total customer deposits",
+        "customer deposits",
+        "other deposits",
+        "fee based service charges",
+        "avg unit price",
+        "volume",
+    ]
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        low = line.lower()
+        # Skip non-transaction sections commonly present on U.S. Bank statements (fees/analysis summaries)
+        if any(k in low for k in ignore_section_markers):
+            continue
+        if not (date_row_num.match(line) or date_row_mon.match(line)):
+            continue
+        # low already computed
+        amts = money_find.findall(line)
+        if not amts:
+            continue
+        # choose first positive token (credit column)
+        amount = None
+        for token in amts:
+            s = token.strip()
+            neg = s.startswith('-') or s.endswith(')')
+            try:
+                val = float(s.replace('(', '').replace(')', '').replace(',', '').replace('$', ''))
+            except Exception:
+                continue
+            if not neg and val > 0:
+                amount = val
+                break
+        if amount is None:
+            continue
+
+        matched = False
+        for proc in known_processors:
+            if proc.lower() in low:
+                processor_totals[proc] += amount
+                matched = True
+        if matched:
+            counted_lines_debug.append(f"{line}  -> +${amount:,.2f}")
+
+    processor_totals = {k: round(v, 2) for k, v in processor_totals.items() if v > 0}
+    total_income = round(sum(processor_totals.values()), 2)
+    return processor_totals, total_income, counted_lines_debug
 
 
 def find_possible_mcas(text):
