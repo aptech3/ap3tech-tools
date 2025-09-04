@@ -83,6 +83,46 @@ def get_statement_subfolder(pdf_path):
     return subfolder
 
 
+def _text_has_domain(text: str, domain: str) -> bool:
+    """Return True if text contains a URL or bare host whose hostname matches the domain.
+
+    - Accepts exact host match or subdomains (e.g., *.example.com).
+    - Parses full URLs with urllib.parse;
+    - Also scans bare-domain tokens with word boundaries.
+    """
+    try:
+        from urllib.parse import urlparse
+    except Exception:
+        urlparse = None  # type: ignore
+
+    d = domain.lower().lstrip('.')
+    s = text
+
+    # Full URLs first
+    try:
+        for u in re.findall(r'(?i)https?://[^\s)>"]+', s):
+            try:
+                host = urlparse(u).hostname if urlparse else ''
+                host = (host or '').lower().strip('.')
+                if host == d or host.endswith('.' + d):
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Bare hosts / domains
+    try:
+        for h in re.findall(r'(?i)\b([a-z0-9.-]+\.[a-z]{2,})\b', s):
+            h2 = h.lower().strip('.')
+            if h2 == d or h2.endswith('.' + d):
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
 def extract_company_name(pdf_path):
     base = os.path.basename(pdf_path)
     name = os.path.splitext(base)[0]
@@ -764,7 +804,11 @@ def summarize_processors(text, known_processors):
 
 def detect_berkshire_bank(text: str) -> bool:
     t = text.lower()
-    if "berkshire bank" in t or "berkshirebank.com" in t:
+    # Word-boundary check for name (not a URL substring)
+    if re.search(r"\bberkshire\s+bank\b", t):
+        return True
+    # Robust host check for the bank domain in any URLs or bare hosts
+    if _text_has_domain(text, "berkshirebank.com"):
         return True
     # Header row clue
     if all(k in t for k in ["date", "description", "additions", "subtractions", "balance"]):
@@ -822,7 +866,11 @@ def _summarize_processors_berkshire(text: str, known_processors):
 
 def detect_us_bank(text: str) -> bool:
     t = text.lower()
-    if "u.s. bank" in t or "us bank" in t or "usbank.com" in t or "usbank" in t:
+    # Name checks with word boundaries and optional punctuation
+    if re.search(r"\bu\.?s\.?\s+bank\b", t) or re.search(r"\bus\s+bank\b", t) or re.search(r"\busbank\b", t):
+        return True
+    # Robust domain check
+    if _text_has_domain(text, "usbank.com"):
         return True
     # Headers commonly seen
     if ("deposits/credits" in t and "withdrawals/debits" in t) or ("credits (+)" in t and "debits (-)" in t):

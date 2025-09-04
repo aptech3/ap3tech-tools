@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (placeholder)
 
 ---
+## [1.5.1] - 2025-09-04
+### Fixed
+- CodeQL hardening: replaced substring URL checks with hostname-aware parsing in bank detection. Adds `_text_has_domain()` and updates Berkshire and U.S. Bank detectors to parse URLs and match subdomains safely (fixes `py/incomplete-url-substring-sanitization`).
+- Bank name checks now use word-boundary aware regex to avoid accidental substring matches.
+
+---
 ## [1.5.0] - 2025-09-04
 ### Added
 - PyQt app: In‑app PDF preview for AI Statement Analysis summary PDFs, with zoom controls and page navigation. Adds “Preview Here” action from completion dialog.
