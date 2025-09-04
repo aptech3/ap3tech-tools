@@ -495,3 +495,96 @@ def highlight_notes_in_pdf(doc, page_num):
                 highlighted_indices.add(i)
 
     return doc
+
+
+# ---------------- CLI ----------------
+def _get_default_output_root() -> str:
+    return os.path.join(os.path.expanduser("~"), "Desktop", "RSG Recovery Tools data output")
+
+
+def _discover_pdfs(paths, recursive: bool = False):
+    pdfs = []
+    for p in paths:
+        if os.path.isdir(p):
+            if recursive:
+                for root, _, files in os.walk(p):
+                    for f in files:
+                        if f.lower().endswith(".pdf"):
+                            pdfs.append(os.path.join(root, f))
+            else:
+                for f in os.listdir(p):
+                    full = os.path.join(p, f)
+                    if os.path.isfile(full) and f.lower().endswith(".pdf"):
+                        pdfs.append(full)
+        else:
+            if os.path.isfile(p) and p.lower().endswith(".pdf"):
+                pdfs.append(p)
+    # De-duplicate while preserving order
+    seen = set()
+    uniq = []
+    for f in pdfs:
+        if f not in seen:
+            seen.add(f)
+            uniq.append(f)
+    return uniq
+
+
+def main(argv=None):
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="evg-splitter",
+        description="Split EVG Recovery PDF(s) into categorized PDFs (UCC, Contract, Client Notes Parsed, Bank Statements, Transaction History, Other).",
+    )
+    parser.add_argument(
+        "inputs",
+        nargs="+",
+        help="One or more PDF files or directories containing PDFs",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=_get_default_output_root(),
+        help="Output root directory (default: ~/Desktop/RSG Recovery Tools data output)",
+    )
+    parser.add_argument(
+        "-r",
+        "--recursive",
+        action="store_true",
+        help="Recurse into directories passed as inputs",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress per-file success messages",
+    )
+
+    args = parser.parse_args(argv)
+
+    os.makedirs(args.output, exist_ok=True)
+    files = _discover_pdfs(args.inputs, recursive=args.recursive)
+    if not files:
+        print("No PDF files found in inputs.", file=sys.stderr)
+        return 2
+
+    ok = 0
+    fail = 0
+    for f in files:
+        try:
+            outdir = split_recovery_pdf(f, output_dir=args.output)
+            ok += 1
+            if not args.quiet:
+                print(f"✔ Split: {os.path.basename(f)} -> {outdir}")
+        except Exception as e:
+            fail += 1
+            print(f"✖ Error processing {f}: {e}", file=sys.stderr)
+
+    if not args.quiet:
+        print(f"Done. Success: {ok}, Failed: {fail}. Output root: {args.output}")
+    return 0 if fail == 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

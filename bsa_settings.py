@@ -80,7 +80,11 @@ def get_merchant_by_id(row_id):
     conn.close()
     if row:
         keys = ["id", "root", "name", "co", "address", "city", "state", "zip", "notes"]
-        return dict(zip(keys, row, strict=False))
+        # return dict(zip(keys, row, strict=False))
+        # Python 3.8/3.9 friendly: no 'strict' kwarg on zip.
+        # Build dict safely even if row is shorter/longer than keys.
+        data= {k: (row[i] if i < len(row) else None) for i, k in enumerate(keys)}
+        return data
     else:
         return None
 
@@ -234,7 +238,6 @@ def import_merchants_txt(filepath):
         reader = csv.reader(f)
         first = True
         for row in reader:
-            print("[DEBUG] import row:", row)  # keep this for now!
             if (
                 first and row and (row[0].lower() in ["root", "name"])
             ):  # supports files with/without root
@@ -307,7 +310,8 @@ def add_suggestion(name, found_in_file=""):
 
 def approve_suggestions(list_of_names):
     for name in list_of_names:
-        add_merchant_full(name)
+        # Add with empty root and provided name
+        add_merchant_full("", name)
         delete_suggestions([name])
 
 
